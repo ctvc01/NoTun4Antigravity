@@ -1,27 +1,17 @@
 # Xcode
-## User settings
-xcuserdata/
-*.xcworkspace/xcuserdata/
-
-## Build generated
-build/
-DerivedData/
+.DS_Store
+*/build/*
 *.moved-aside
 *.xcuserstate
+xcuserdata/
+*.xcscmblueprint
 
-## Swift Package Manager
+# DerivedData
+DerivedData/
+
+# Swift Package Manager
 .build/
 .swiftpm/
+
+# Temporary caches
 .swift-cache/
-
-## macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-Icon
-._*
-
-## Temporary & Backups
-*~
-*.orig
-*.swp
