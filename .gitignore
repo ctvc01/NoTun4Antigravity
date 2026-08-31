@@ -1,0 +1,27 @@
+# Xcode
+## User settings
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+## Build generated
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+
+## Swift Package Manager
+.build/
+.swiftpm/
+.swift-cache/
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+## Temporary & Backups
+*~
+*.orig
+*.swp
