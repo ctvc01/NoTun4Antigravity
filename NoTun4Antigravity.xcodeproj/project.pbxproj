@@ -6,27 +6,8 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXContainerItemProxy section */
-		14A7D7203045518F006FA301 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 14A7D70A3045518C006FA301 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 14A7D7113045518C006FA301;
-			remoteInfo = NoTun4Antigravity;
-		};
-		14A7D72A3045518F006FA301 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 14A7D70A3045518C006FA301 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 14A7D7113045518C006FA301;
-			remoteInfo = NoTun4Antigravity;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXFileReference section */
 		14A7D7123045518C006FA301 /* NoTun4Antigravity.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoTun4Antigravity.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		14A7D71F3045518F006FA301 /* NoTun4AntigravityTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NoTun4AntigravityTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		14A7D7293045518F006FA301 /* NoTun4AntigravityUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NoTun4AntigravityUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,34 +16,10 @@
 			path = NoTun4Antigravity;
 			sourceTree = "<group>";
 		};
-		14A7D7223045518F006FA301 /* NoTun4AntigravityTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = NoTun4AntigravityTests;
-			sourceTree = "<group>";
-		};
-		14A7D72C3045518F006FA301 /* NoTun4AntigravityUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = NoTun4AntigravityUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		14A7D70F3045518C006FA301 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		14A7D71C3045518F006FA301 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		14A7D7263045518F006FA301 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -76,8 +33,6 @@
 			isa = PBXGroup;
 			children = (
 				14A7D7143045518C006FA301 /* NoTun4Antigravity */,
-				14A7D7223045518F006FA301 /* NoTun4AntigravityTests */,
-				14A7D72C3045518F006FA301 /* NoTun4AntigravityUITests */,
 				14A7D7133045518C006FA301 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -86,8 +41,6 @@
 			isa = PBXGroup;
 			children = (
 				14A7D7123045518C006FA301 /* NoTun4Antigravity.app */,
-				14A7D71F3045518F006FA301 /* NoTun4AntigravityTests.xctest */,
-				14A7D7293045518F006FA301 /* NoTun4AntigravityUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -117,52 +70,6 @@
 			productReference = 14A7D7123045518C006FA301 /* NoTun4Antigravity.app */;
 			productType = "com.apple.product-type.application";
 		};
-		14A7D71E3045518F006FA301 /* NoTun4AntigravityTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 14A7D7363045518F006FA301 /* Build configuration list for PBXNativeTarget "NoTun4AntigravityTests" */;
-			buildPhases = (
-				14A7D71B3045518F006FA301 /* Sources */,
-				14A7D71C3045518F006FA301 /* Frameworks */,
-				14A7D71D3045518F006FA301 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				14A7D7213045518F006FA301 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				14A7D7223045518F006FA301 /* NoTun4AntigravityTests */,
-			);
-			name = NoTun4AntigravityTests;
-			packageProductDependencies = (
-			);
-			productName = NoTun4AntigravityTests;
-			productReference = 14A7D71F3045518F006FA301 /* NoTun4AntigravityTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		14A7D7283045518F006FA301 /* NoTun4AntigravityUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 14A7D7393045518F006FA301 /* Build configuration list for PBXNativeTarget "NoTun4AntigravityUITests" */;
-			buildPhases = (
-				14A7D7253045518F006FA301 /* Sources */,
-				14A7D7263045518F006FA301 /* Frameworks */,
-				14A7D7273045518F006FA301 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				14A7D72B3045518F006FA301 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				14A7D72C3045518F006FA301 /* NoTun4AntigravityUITests */,
-			);
-			name = NoTun4AntigravityUITests;
-			packageProductDependencies = (
-			);
-			productName = NoTun4AntigravityUITests;
-			productReference = 14A7D7293045518F006FA301 /* NoTun4AntigravityUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -175,14 +82,6 @@
 				TargetAttributes = {
 					14A7D7113045518C006FA301 = {
 						CreatedOnToolsVersion = 26.6;
-					};
-					14A7D71E3045518F006FA301 = {
-						CreatedOnToolsVersion = 26.6;
-						TestTargetID = 14A7D7113045518C006FA301;
-					};
-					14A7D7283045518F006FA301 = {
-						CreatedOnToolsVersion = 26.6;
-						TestTargetID = 14A7D7113045518C006FA301;
 					};
 				};
 			};
@@ -201,28 +100,12 @@
 			projectRoot = "";
 			targets = (
 				14A7D7113045518C006FA301 /* NoTun4Antigravity */,
-				14A7D71E3045518F006FA301 /* NoTun4AntigravityTests */,
-				14A7D7283045518F006FA301 /* NoTun4AntigravityUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		14A7D7103045518C006FA301 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		14A7D71D3045518F006FA301 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		14A7D7273045518F006FA301 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -239,34 +122,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		14A7D71B3045518F006FA301 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		14A7D7253045518F006FA301 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		14A7D7213045518F006FA301 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 14A7D7113045518C006FA301 /* NoTun4Antigravity */;
-			targetProxy = 14A7D7203045518F006FA301 /* PBXContainerItemProxy */;
-		};
-		14A7D72B3045518F006FA301 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 14A7D7113045518C006FA301 /* NoTun4Antigravity */;
-			targetProxy = 14A7D72A3045518F006FA301 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		14A7D7313045518F006FA301 /* Debug */ = {
@@ -453,86 +309,6 @@
 			};
 			name = Release;
 		};
-		14A7D7373045518F006FA301 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5TK9P9Q2LD;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ct.NoTun4AntigravityTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NoTun4Antigravity.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NoTun4Antigravity";
-			};
-			name = Debug;
-		};
-		14A7D7383045518F006FA301 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5TK9P9Q2LD;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ct.NoTun4AntigravityTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NoTun4Antigravity.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NoTun4Antigravity";
-			};
-			name = Release;
-		};
-		14A7D73A3045518F006FA301 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5TK9P9Q2LD;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ct.NoTun4AntigravityUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = NoTun4Antigravity;
-			};
-			name = Debug;
-		};
-		14A7D73B3045518F006FA301 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5TK9P9Q2LD;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ct.NoTun4AntigravityUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = NoTun4Antigravity;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -550,24 +326,6 @@
 			buildConfigurations = (
 				14A7D7343045518F006FA301 /* Debug */,
 				14A7D7353045518F006FA301 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		14A7D7363045518F006FA301 /* Build configuration list for PBXNativeTarget "NoTun4AntigravityTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				14A7D7373045518F006FA301 /* Debug */,
-				14A7D7383045518F006FA301 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		14A7D7393045518F006FA301 /* Build configuration list for PBXNativeTarget "NoTun4AntigravityUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				14A7D73A3045518F006FA301 /* Debug */,
-				14A7D73B3045518F006FA301 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
