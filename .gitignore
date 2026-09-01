@@ -8,10 +8,12 @@ xcuserdata/
 
 # DerivedData
 DerivedData/
+build/
 
 # Swift Package Manager
 .build/
 .swiftpm/
 
-# Temporary caches
+# Temporary caches & Dist staging
 .swift-cache/
+dist/dmg_staging/
