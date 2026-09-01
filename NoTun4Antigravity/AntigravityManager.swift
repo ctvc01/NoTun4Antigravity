@@ -48,7 +48,6 @@ final class AntigravityManager: ObservableObject {
             .sink { [weak self] _ in self?.checkProcessStatus() }
             .store(in: &workspaceCancellables)
 
-        // 主线程定时轮询，无并发闭包捕获开销
         let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.refreshStatus()
         }
@@ -66,7 +65,7 @@ final class AntigravityManager: ObservableObject {
 
     // MARK: - Process Inspection
 
-    private func findAntigravityApps() -> [NSRunningApplication] {
+    func findAntigravityApps() -> [NSRunningApplication] {
         let currentAppPID = NSRunningApplication.current.processIdentifier
         return NSWorkspace.shared.runningApplications.filter { app in
             if app.processIdentifier == currentAppPID {
@@ -82,8 +81,10 @@ final class AntigravityManager: ObservableObject {
                 }
             }
 
-            if let name = app.localizedName?.lowercased(), name == "antigravity" {
-                return true
+            if let name = app.localizedName?.lowercased() {
+                if name == "antigravity" {
+                    return true
+                }
             }
 
             return false
@@ -151,6 +152,56 @@ final class AntigravityManager: ObservableObject {
         return false
     }
 
+    // MARK: - Smart Whitelist Normalization (Multi-level Subdomain & Chromium Bypass)
+
+    nonisolated static func normalizeWhitelist(rawText: String) -> (noProxyEnv: String, chromiumBypass: String) {
+        let rawItems = rawText
+            .components(separatedBy: CharacterSet.newlines.union(CharacterSet(charactersIn: ",")))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var noProxySet = Set<String>(["localhost", "127.0.0.1", "::1", "*.local", ".local"])
+        var chromiumSet = Set<String>(["localhost", "127.0.0.1", "<local>", "*.local"])
+
+        for item in rawItems {
+            let trimmed = item.lowercased()
+            if trimmed.isEmpty { continue }
+
+            // IP 或者 CIDR (如 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1)
+            if trimmed.contains("/") || trimmed.allSatisfy({ "0123456789.:".contains($0) }) {
+                noProxySet.insert(trimmed)
+                chromiumSet.insert(trimmed)
+                continue
+            }
+
+            // 提取干净的主域名（去除前面的 *. 或 . 或 *）
+            var domain = trimmed
+            if domain.hasPrefix("*.") {
+                domain = String(domain.dropFirst(2))
+            } else if domain.hasPrefix(".") {
+                domain = String(domain.dropFirst(1))
+            } else if domain.hasPrefix("*") {
+                domain = String(domain.dropFirst(1))
+            }
+
+            guard !domain.isEmpty else { continue }
+
+            // 智能为 POSIX / Node.js / Python / Chromium 生成全场景无死角匹配集
+            // 确保多级子域名 (如 product.activity.ctripcorp.com) 100% 命中
+            noProxySet.insert(domain)
+            noProxySet.insert(".\(domain)")
+            noProxySet.insert("*.\(domain)")
+
+            chromiumSet.insert(domain)
+            chromiumSet.insert("*.\(domain)")
+            chromiumSet.insert(".*\(domain)")
+        }
+
+        let noProxyEnv = noProxySet.sorted().joined(separator: ",")
+        let chromiumBypass = chromiumSet.sorted().joined(separator: ";")
+        return (noProxyEnv, chromiumBypass)
+    }
+
     // MARK: - Actions
 
     func launch(
@@ -176,75 +227,97 @@ final class AntigravityManager: ObservableObject {
         proxyPort: Int = defaultProxyPort,
         rawWhitelistText: String = defaultWhitelistLines
     ) {
-        statusMessage = "Restarting Antigravity..."
-        terminateAllAntigravity()
+        statusMessage = "正在关闭旧进程..."
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.executeOpen(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: rawWhitelistText)
+        Task {
+            // 1. 先发送优雅终止信号
+            let runningApps = self.findAntigravityApps()
+            for app in runningApps {
+                app.terminate()
+            }
+
+            // 2. 轮询等待进程真正退出（最多等待 1.5 秒）
+            var waitCount = 0
+            while waitCount < 15 {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                let current = self.findAntigravityApps()
+                if current.isEmpty {
+                    break
+                }
+                waitCount += 1
+            }
+
+            // 3. 若仍有残留进程未退出，强制强杀（forceTerminate / SIGKILL）
+            let remaining = self.findAntigravityApps()
+            for app in remaining {
+                app.forceTerminate()
+            }
+
+            if !remaining.isEmpty {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+
+            self.checkProcessStatus()
+
+            // 4. 以最新参数与环境变量干净拉起
+            self.statusMessage = "正在以新配置启动..."
+            self.executeOpen(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: rawWhitelistText)
         }
     }
 
     func terminate() {
-        terminateAllAntigravity()
-        statusMessage = "Antigravity terminated."
-    }
-
-    private func terminateAllAntigravity() {
         let runningApps = findAntigravityApps()
         for app in runningApps {
             app.terminate()
         }
         checkProcessStatus()
+        statusMessage = "Antigravity terminated."
     }
 
     private func executeOpen(useProxy: Bool, proxyPort: Int, rawWhitelistText: String) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-a", "Antigravity"]
 
-        var environment = ProcessInfo.processInfo.environment
+        var args: [String] = ["-n", "-a", "Antigravity"]
 
         if useProxy {
             let portStr = String(proxyPort)
             let proxyUrl = "http://127.0.0.1:\(portStr)"
             let socksUrl = "socks5h://127.0.0.1:\(portStr)"
 
-            environment["HTTP_PROXY"] = proxyUrl
-            environment["HTTPS_PROXY"] = proxyUrl
-            environment["ALL_PROXY"] = socksUrl
-            environment["http_proxy"] = proxyUrl
-            environment["https_proxy"] = proxyUrl
-            environment["all_proxy"] = socksUrl
+            let (noProxyEnv, chromiumBypass) = Self.normalizeWhitelist(rawText: rawWhitelistText)
 
-            let rules = rawWhitelistText
-                .components(separatedBy: CharacterSet.newlines.union(CharacterSet(charactersIn: ",")))
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            // 1. 通过 open --env 将环境变量显式注入到被拉起的 GUI 应用程序进程树中
+            args.append(contentsOf: [
+                "--env", "HTTP_PROXY=\(proxyUrl)",
+                "--env", "HTTPS_PROXY=\(proxyUrl)",
+                "--env", "ALL_PROXY=\(socksUrl)",
+                "--env", "http_proxy=\(proxyUrl)",
+                "--env", "https_proxy=\(proxyUrl)",
+                "--env", "all_proxy=\(socksUrl)",
+                "--env", "NO_PROXY=\(noProxyEnv)",
+                "--env", "no_proxy=\(noProxyEnv)"
+            ])
 
-            let noProxyFormatted = rules.isEmpty ? "localhost,127.0.0.1" : rules.joined(separator: ",")
-
-            environment["NO_PROXY"] = noProxyFormatted
-            environment["no_proxy"] = noProxyFormatted
-        } else {
-            environment.removeValue(forKey: "HTTP_PROXY")
-            environment.removeValue(forKey: "HTTPS_PROXY")
-            environment.removeValue(forKey: "ALL_PROXY")
-            environment.removeValue(forKey: "http_proxy")
-            environment.removeValue(forKey: "https_proxy")
-            environment.removeValue(forKey: "all_proxy")
+            // 2. 同时通过 --args 注入 Chromium / Electron 原生命令行代理与绕过列表（双保险）
+            args.append(contentsOf: [
+                "--args",
+                "--proxy-server=\(proxyUrl)",
+                "--proxy-bypass-list=\(chromiumBypass)"
+            ])
         }
 
-        task.environment = environment
+        task.arguments = args
 
         do {
             try task.run()
-            statusMessage = useProxy ? "Launched with proxy (Port \(proxyPort))" : "Launched cleanly (No proxy)"
+            statusMessage = useProxy ? "已应用代理 (端口 \(proxyPort)) 并启动" : "已直连干净启动 (无代理)"
         } catch {
-            statusMessage = "Launch failed: \(error.localizedDescription)"
-            print("Failed to launch Antigravity: \(error)")
+            statusMessage = "启动失败: \(error.localizedDescription)"
+            print("Failed to execute open for Antigravity: \(error)")
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.checkProcessStatus()
         }
     }
