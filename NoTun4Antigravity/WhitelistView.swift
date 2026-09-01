@@ -104,7 +104,7 @@ struct WhitelistView: View {
             .padding(18)
             .frame(width: 460, height: 380)
 
-            // MARK: - Toast Overlay (Emil Polish: scale from 0.94 -> 1.0, exit 150ms)
+            // MARK: - Toast Overlay
             if showToast {
                 VStack {
                     Spacer()
@@ -135,14 +135,19 @@ struct WhitelistView: View {
         }
         .background(.ultraThinMaterial)
         .onAppear {
-            // 直接读取用户当前已有的白名单规则，绝不覆盖
             editorContent = whitelistRules
         }
     }
 
     private func submitRules() {
         whitelistRules = editorContent
-        toastMessage = "规则已保存，请点击「应用配置&重启」生效"
+
+        if manager.isRunning {
+            manager.restart(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: editorContent)
+            toastMessage = "白名单已保存，正在重启 Antigravity 生效..."
+        } else {
+            toastMessage = "白名单已保存，下次启动时生效。"
+        }
 
         withAnimation {
             showToast = true

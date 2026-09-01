@@ -146,7 +146,7 @@ struct ProxyPortView: View {
             .padding(18)
             .frame(width: 420, height: 210)
 
-            // MARK: - Toast Overlay (Emil Polish: scale from 0.94 -> 1.0, exit 150ms)
+            // MARK: - Toast Overlay
             if showToast {
                 VStack {
                     Spacer()
@@ -209,7 +209,13 @@ struct ProxyPortView: View {
 
         proxyPort = p
         manager.refreshStatus(port: p)
-        toastMessage = "端口已保存为 \(p)，请点击「应用配置&重启」生效"
+
+        if manager.isRunning {
+            manager.restart(useProxy: useProxy, proxyPort: p, rawWhitelistText: whitelistRules)
+            toastMessage = "端口已保存为 \(p)，正在重启 Antigravity 生效..."
+        } else {
+            toastMessage = "端口已保存为 \(p)，下次启动时生效。"
+        }
 
         withAnimation {
             showToast = true
