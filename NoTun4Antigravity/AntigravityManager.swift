@@ -187,7 +187,6 @@ final class AntigravityManager: ObservableObject {
             guard !domain.isEmpty else { continue }
 
             // 智能为 POSIX / Node.js / Python / Chromium 生成全场景无死角匹配集
-            // 确保多级子域名 (如 product.activity.ctripcorp.com) 100% 命中
             noProxySet.insert(domain)
             noProxySet.insert(".\(domain)")
             noProxySet.insert("*.\(domain)")
@@ -202,6 +201,28 @@ final class AntigravityManager: ObservableObject {
         return (noProxyEnv, chromiumBypass)
     }
 
+    // MARK: - System Proxy Bypass Sync (让浏览器等系统级软件也同步直连)
+
+    nonisolated static func syncSystemProxyBypassDomains(rawText: String) {
+        let (noProxyEnv, _) = normalizeWhitelist(rawText: rawText)
+        let domains = noProxyEnv.components(separatedBy: ",").filter { !$0.isEmpty }
+        guard !domains.isEmpty else { return }
+
+        let commonServices = ["Wi-Fi", "USB 10/100/1000 LAN", "AX88179A", "Ethernet", "Thunderbolt Bridge"]
+
+        DispatchQueue.global(qos: .utility).async {
+            for service in commonServices {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+                var args = ["-setproxybypassdomains", service]
+                args.append(contentsOf: domains)
+                task.arguments = args
+                try? task.run()
+                task.waitUntilExit()
+            }
+        }
+    }
+
     // MARK: - Actions
 
     func launch(
@@ -209,6 +230,8 @@ final class AntigravityManager: ObservableObject {
         proxyPort: Int = defaultProxyPort,
         rawWhitelistText: String = defaultWhitelistLines
     ) {
+        Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
+
         if isRunning, let app = findAntigravityApps().first {
             if #available(macOS 14.0, *) {
                 app.activate()
@@ -228,15 +251,14 @@ final class AntigravityManager: ObservableObject {
         rawWhitelistText: String = defaultWhitelistLines
     ) {
         statusMessage = "正在关闭旧进程..."
+        Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
 
         Task {
-            // 1. 先发送优雅终止信号
             let runningApps = self.findAntigravityApps()
             for app in runningApps {
                 app.terminate()
             }
 
-            // 2. 轮询等待进程真正退出（最多等待 1.5 秒）
             var waitCount = 0
             while waitCount < 15 {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
@@ -247,7 +269,6 @@ final class AntigravityManager: ObservableObject {
                 waitCount += 1
             }
 
-            // 3. 若仍有残留进程未退出，强制强杀（forceTerminate / SIGKILL）
             let remaining = self.findAntigravityApps()
             for app in remaining {
                 app.forceTerminate()
@@ -259,7 +280,6 @@ final class AntigravityManager: ObservableObject {
 
             self.checkProcessStatus()
 
-            // 4. 以最新参数与环境变量干净拉起
             self.statusMessage = "正在以新配置启动..."
             self.executeOpen(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: rawWhitelistText)
         }
@@ -279,6 +299,7 @@ final class AntigravityManager: ObservableObject {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
 
         var args: [String] = ["-n", "-a", "Antigravity"]
+        var environment = ProcessInfo.processInfo.environment
 
         if useProxy {
             let portStr = String(proxyPort)
@@ -287,7 +308,15 @@ final class AntigravityManager: ObservableObject {
 
             let (noProxyEnv, chromiumBypass) = Self.normalizeWhitelist(rawText: rawWhitelistText)
 
-            // 1. 通过 open --env 将环境变量显式注入到被拉起的 GUI 应用程序进程树中
+            environment["HTTP_PROXY"] = proxyUrl
+            environment["HTTPS_PROXY"] = proxyUrl
+            environment["ALL_PROXY"] = socksUrl
+            environment["http_proxy"] = proxyUrl
+            environment["https_proxy"] = proxyUrl
+            environment["all_proxy"] = socksUrl
+            environment["NO_PROXY"] = noProxyEnv
+            environment["no_proxy"] = noProxyEnv
+
             args.append(contentsOf: [
                 "--env", "HTTP_PROXY=\(proxyUrl)",
                 "--env", "HTTPS_PROXY=\(proxyUrl)",
@@ -299,15 +328,24 @@ final class AntigravityManager: ObservableObject {
                 "--env", "no_proxy=\(noProxyEnv)"
             ])
 
-            // 2. 同时通过 --args 注入 Chromium / Electron 原生命令行代理与绕过列表（双保险）
             args.append(contentsOf: [
                 "--args",
                 "--proxy-server=\(proxyUrl)",
                 "--proxy-bypass-list=\(chromiumBypass)"
             ])
+        } else {
+            environment.removeValue(forKey: "HTTP_PROXY")
+            environment.removeValue(forKey: "HTTPS_PROXY")
+            environment.removeValue(forKey: "ALL_PROXY")
+            environment.removeValue(forKey: "http_proxy")
+            environment.removeValue(forKey: "https_proxy")
+            environment.removeValue(forKey: "all_proxy")
+            environment.removeValue(forKey: "NO_PROXY")
+            environment.removeValue(forKey: "no_proxy")
         }
 
         task.arguments = args
+        task.environment = environment
 
         do {
             try task.run()
