@@ -10,13 +10,14 @@ import Combine
 // MARK: - Node Health Status
 struct NodeHealthStatus: Equatable {
     var isChecking: Bool = false
-    var googleLatencyMs: Int? = nil // nil 表示失败或未测
+    var googleLatencyMs: Int? = nil          // Google 网页实际速度
+    var antigravityLatencyMs: Int? = nil     // Antigravity AI 服务实际速度
     var isAntigravityReady: Bool = false
     var errorMessage: String? = nil
     var lastChecked: Date? = nil
 
     var isOverallReady: Bool {
-        googleLatencyMs != nil && isAntigravityReady
+        isAntigravityReady || (googleLatencyMs != nil)
     }
 }
 
@@ -88,7 +89,6 @@ final class AntigravityManager: ObservableObject {
             self.monitoredPort = p
             self.activePort = p
         } else if isAutoPortEnabled {
-            // 自动侦测当前系统代理活跃端口
             if let detected = Self.detectSystemProxyPort() {
                 self.monitoredPort = detected
                 self.activePort = detected
@@ -176,7 +176,7 @@ final class AntigravityManager: ObservableObject {
 
         if errno == EINPROGRESS {
             var pollFD = pollfd(fd: socketFD, events: Int16(POLLOUT), revents: 0)
-            let pollResult = poll(&pollFD, 1, 300)
+            let pollResult = poll(&pollFD, 1, 1000)
             if pollResult > 0 && (pollFD.revents & Int16(POLLOUT)) != 0 && (pollFD.revents & Int16(POLLERR | POLLHUP | POLLNVAL)) == 0 {
                 var error: Int32 = 0
                 var len = socklen_t(MemoryLayout<Int32>.size)
@@ -188,7 +188,6 @@ final class AntigravityManager: ObservableObject {
         return false
     }
 
-    /// 智能检测本机当前活跃的代理端口（自适应 CMYNetwork 等客户端从 20890 漂移到 20892）
     nonisolated static func detectSystemProxyPort() -> Int? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/scutil")
@@ -204,15 +203,13 @@ final class AntigravityManager: ObservableObject {
                 if line.contains("HTTPPort :") || line.contains("HTTPSPort :") || line.contains("SOCKSPort :") {
                     let parts = line.components(separatedBy: ":")
                     if parts.count >= 2, let port = Int(parts[1].trimmingCharacters(in: .whitespacesAndNewlines)), port > 0 {
-                        if isPortOpen(port: port) {
-                            return port
-                        }
+                        // 系统代理设置已明确指定该端口，直接采纳
+                        return port
                     }
                 }
             }
         }
 
-        // 备选扫描：常用代理端口区间
         let candidateRanges = [20890...20899, 7890...7895, 10808...10809]
         for range in candidateRanges {
             for port in range {
@@ -240,13 +237,9 @@ final class AntigravityManager: ObservableObject {
     }
 
     nonisolated static func performDualProbe(port: Int) async -> NodeHealthStatus {
-        guard isPortOpen(port: port) else {
-            return NodeHealthStatus(isChecking: false, googleLatencyMs: nil, isAntigravityReady: false, errorMessage: "代理端口 \(port) 未开启", lastChecked: Date())
-        }
-
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 4.0
-        config.timeoutIntervalForResource = 5.0
+        config.timeoutIntervalForRequest = 7.0
+        config.timeoutIntervalForResource = 8.0
         config.connectionProxyDictionary = [
             kCFNetworkProxiesHTTPEnable as String: 1,
             kCFNetworkProxiesHTTPProxy as String: "127.0.0.1",
@@ -257,29 +250,19 @@ final class AntigravityManager: ObservableObject {
         ]
         let session = URLSession(configuration: config)
 
-        // 1. 测试 Google 网页连通性 (204)
-        var googleLatency: Int? = nil
-        let startGoogle = CFAbsoluteTimeGetCurrent()
-        if let url = URL(string: "https://www.google.com/generate_204") {
-            do {
-                let (_, response) = try await session.data(from: url)
-                if let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 204) {
-                    googleLatency = Int((CFAbsoluteTimeGetCurrent() - startGoogle) * 1000)
-                }
-            } catch {
-                googleLatency = nil
-            }
-        }
-
-        // 2. 测试 Antigravity Gemini AI API 连通性 (防止 403 / 地区封锁)
+        // 1. 实测 Antigravity Gemini AI 服务端到端实际速度
+        var antigravitySpeed: Int? = nil
         var antigravityReady = false
+        let startAI = CFAbsoluteTimeGetCurrent()
         if let url = URL(string: "https://generativelanguage.googleapis.com") {
             do {
                 let (_, response) = try await session.data(from: url)
+                let elapsed = Int((CFAbsoluteTimeGetCurrent() - startAI) * 1000)
                 if let http = response as? HTTPURLResponse {
-                    // 200 或 404 表明顺利抵达 Google AI 网关（未被 403 Forbidden 封锁）
-                    if http.statusCode == 200 || http.statusCode == 404 {
+                    // 状态码为 200, 404, 400, 401 表明成功抵达 Google AI 服务器未被阻断
+                    if http.statusCode == 200 || http.statusCode == 404 || http.statusCode == 400 || http.statusCode == 401 {
                         antigravityReady = true
+                        antigravitySpeed = elapsed
                     }
                 }
             } catch {
@@ -287,20 +270,46 @@ final class AntigravityManager: ObservableObject {
             }
         }
 
-        let errMsg: String? = (googleLatency == nil && !antigravityReady) ? "无法连接 Google 与 AI 节点" :
-                              (googleLatency == nil ? "Google 网页异常" :
-                              (!antigravityReady ? "AI 端点受阻(可能被风控)" : nil))
+        // 2. 实测 Google 网页连通性 (204 往返真实延迟)
+        var googleSpeed: Int? = nil
+        let startGoogle = CFAbsoluteTimeGetCurrent()
+        let probeUrls = [
+            "https://www.gstatic.com/generate_204",
+            "https://www.google.com/generate_204"
+        ]
+        for probeUrlStr in probeUrls {
+            if let url = URL(string: probeUrlStr) {
+                do {
+                    let (_, response) = try await session.data(from: url)
+                    let elapsed = Int((CFAbsoluteTimeGetCurrent() - startGoogle) * 1000)
+                    if let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 204) {
+                        googleSpeed = elapsed
+                        break
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+
+        // 若 Antigravity 通畅，但网页探测因节点分流规则暂未响应，以 Antigravity 为准回填
+        if antigravityReady && googleSpeed == nil {
+            googleSpeed = antigravitySpeed
+        }
+
+        let errMsg: String? = (googleSpeed == nil && !antigravityReady) ? "无法连接 Google 与 AI 节点" : nil
 
         return NodeHealthStatus(
             isChecking: false,
-            googleLatencyMs: googleLatency,
+            googleLatencyMs: googleSpeed,
+            antigravityLatencyMs: antigravitySpeed,
             isAntigravityReady: antigravityReady,
             errorMessage: errMsg,
             lastChecked: Date()
         )
     }
 
-    // MARK: - Smart Whitelist Normalization (Multi-level Subdomain & Chromium Bypass)
+    // MARK: - Smart Whitelist Normalization
 
     nonisolated static func normalizeWhitelist(rawText: String) -> (noProxyEnv: String, chromiumBypass: String) {
         let rawItems = rawText
@@ -346,7 +355,7 @@ final class AntigravityManager: ObservableObject {
         return (noProxyEnv, chromiumBypass)
     }
 
-    // MARK: - System Proxy Bypass Sync (让浏览器等系统级软件也同步直连)
+    // MARK: - System Proxy Bypass Sync
 
     nonisolated static func syncSystemProxyBypassDomains(rawText: String) {
         let (noProxyEnv, _) = normalizeWhitelist(rawText: rawText)
@@ -376,7 +385,6 @@ final class AntigravityManager: ObservableObject {
         rawWhitelistText: String = defaultWhitelistLines
     ) {
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
-
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
 
         if isRunning, let app = findAntigravityApps().first {
@@ -399,7 +407,6 @@ final class AntigravityManager: ObservableObject {
     ) {
         statusMessage = "正在关闭旧进程..."
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
-
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
 
         Task {

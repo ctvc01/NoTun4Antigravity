@@ -28,7 +28,7 @@ final class NodeSpeedTestWindowManager: NSObject, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: speedTestView)
 
         let newWindow = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 380),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
