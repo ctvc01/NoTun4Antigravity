@@ -308,6 +308,7 @@ final class AntigravityManager: ObservableObject {
 
             let (noProxyEnv, chromiumBypass) = Self.normalizeWhitelist(rawText: rawWhitelistText)
 
+            // 1. 代理及长连接保持环境变量
             environment["HTTP_PROXY"] = proxyUrl
             environment["HTTPS_PROXY"] = proxyUrl
             environment["ALL_PROXY"] = socksUrl
@@ -316,6 +317,10 @@ final class AntigravityManager: ObservableObject {
             environment["all_proxy"] = socksUrl
             environment["NO_PROXY"] = noProxyEnv
             environment["no_proxy"] = noProxyEnv
+            environment["GRPC_KEEPALIVE_TIME_MS"] = "10000"
+            environment["GRPC_KEEPALIVE_TIMEOUT_MS"] = "5000"
+            environment["GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS"] = "1"
+            environment["GRPC_HTTP2_MIN_SENT_PING_INTERVAL_WITHOUT_DATA_MS"] = "5000"
 
             args.append(contentsOf: [
                 "--env", "HTTP_PROXY=\(proxyUrl)",
@@ -325,13 +330,19 @@ final class AntigravityManager: ObservableObject {
                 "--env", "https_proxy=\(proxyUrl)",
                 "--env", "all_proxy=\(socksUrl)",
                 "--env", "NO_PROXY=\(noProxyEnv)",
-                "--env", "no_proxy=\(noProxyEnv)"
+                "--env", "no_proxy=\(noProxyEnv)",
+                "--env", "GRPC_KEEPALIVE_TIME_MS=10000",
+                "--env", "GRPC_KEEPALIVE_TIMEOUT_MS=5000",
+                "--env", "GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS=1"
             ])
 
+            // 2. Chromium 核心参数：禁用 QUIC 强制纯净 TCP、注入代理与白名单
             args.append(contentsOf: [
                 "--args",
                 "--proxy-server=\(proxyUrl)",
-                "--proxy-bypass-list=\(chromiumBypass)"
+                "--proxy-bypass-list=\(chromiumBypass)",
+                "--disable-quic",
+                "--ssl-version-min=tls1.2"
             ])
         } else {
             environment.removeValue(forKey: "HTTP_PROXY")
@@ -342,6 +353,10 @@ final class AntigravityManager: ObservableObject {
             environment.removeValue(forKey: "all_proxy")
             environment.removeValue(forKey: "NO_PROXY")
             environment.removeValue(forKey: "no_proxy")
+            environment.removeValue(forKey: "GRPC_KEEPALIVE_TIME_MS")
+            environment.removeValue(forKey: "GRPC_KEEPALIVE_TIMEOUT_MS")
+            environment.removeValue(forKey: "GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS")
+            environment.removeValue(forKey: "GRPC_HTTP2_MIN_SENT_PING_INTERVAL_WITHOUT_DATA_MS")
         }
 
         task.arguments = args
