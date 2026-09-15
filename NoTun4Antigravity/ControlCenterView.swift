@@ -13,6 +13,7 @@ struct ControlCenterView: View {
     @AppStorage("whitelistRules") private var whitelistRules: String = AntigravityManager.defaultWhitelistLines
 
     @State private var isHoveringProxyCard = false
+    @State private var isHoveringSpeedCard = false
     @State private var isHoveringWhitelist = false
     @State private var isHoveringRestart = false
     @State private var isHoveringQuit = false
@@ -27,14 +28,14 @@ struct ControlCenterView: View {
             .count
     }
 
-    // 动态读取版本号
+    // 动态读取版本号，默认 1.2
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
     }
 
     var body: some View {
         ZStack {
-            VStack(spacing: 12) {
+            VStack(spacing: 11) {
                 // MARK: - 1. Top Header: Brand & Live Status
                 HStack(alignment: .center, spacing: 10) {
                     Image("AppLogo")
@@ -55,7 +56,7 @@ struct ControlCenterView: View {
 
                     Spacer()
 
-                    // Status Pill Badge (Direct & Clear)
+                    // Status Pill Badge
                     HStack(spacing: 5) {
                         Circle()
                             .fill(manager.isRunning ? Color.green : Color.secondary.opacity(0.5))
@@ -78,7 +79,7 @@ struct ControlCenterView: View {
                 }
                 .padding(.horizontal, 4)
 
-                // MARK: - 2. Proxy Hub Card (Title + Subtitle with Dot & Port & Edit Link)
+                // MARK: - 2. Proxy Hub Card (Title + Port + Live Probe)
                 GlassCard(isHovered: isHoveringProxyCard) {
                     HStack(spacing: 11) {
                         ZStack {
@@ -95,14 +96,14 @@ struct ControlCenterView: View {
                             Text("Antigravity代理")
                                 .font(.system(size: 12, weight: .semibold))
 
-                            // 副标题：状态圆点 + 代理端口 20890 + 「修改」文字链
+                            // 副标题：状态圆点 + 端口 (自动感知) + 「修改」
                             HStack(spacing: 5) {
                                 Circle()
                                     .fill(manager.isProxyPortReady ? Color.green : Color.orange)
                                     .frame(width: 5, height: 5)
                                     .shadow(color: manager.isProxyPortReady ? Color.green.opacity(0.6) : Color.orange.opacity(0.6), radius: 2)
 
-                                Text("代理端口 \(String(proxyPort))")
+                                Text("端口 \(String(manager.activePort))")
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                                     .monospacedDigit()
                                     .foregroundColor(.secondary)
@@ -125,7 +126,58 @@ struct ControlCenterView: View {
                 }
                 .onHover { isHoveringProxyCard = $0 }
 
-                // MARK: - 3. Whitelist Rules Card (Dynamic "n 条规则生效中")
+                // MARK: - 3. Node Real-World Speed Test Card (双重真测速与可用筛选)
+                Button {
+                    NodeSpeedTestWindowManager.shared.show()
+                } label: {
+                    GlassCard(isHovered: isHoveringSpeedCard) {
+                        HStack(spacing: 11) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.orange.opacity(0.16))
+                                    .frame(width: 28, height: 28)
+
+                                Image(systemName: "speedometer")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(Color.orange)
+                            }
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("节点真机测速与筛选")
+                                    .font(.system(size: 12, weight: .semibold))
+
+                                HStack(spacing: 6) {
+                                    if manager.nodeHealth.isChecking {
+                                        Text("正在探测节点可用性...")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    } else if let ms = manager.nodeHealth.googleLatencyMs {
+                                        Text("Google: \(ms)ms")
+                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .foregroundColor(.green)
+                                        Text(manager.nodeHealth.isAntigravityReady ? "• AI就绪" : "• AI受限")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(manager.nodeHealth.isAntigravityReady ? .green : .orange)
+                                    } else {
+                                        Text("节点未连通 / 需测速")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.red.opacity(0.8))
+                                    }
+                                }
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.7))
+                        }
+                    }
+                }
+                .buttonStyle(SpringButtonStyle(scale: 0.98))
+                .onHover { isHoveringSpeedCard = $0 }
+
+                // MARK: - 4. Whitelist Rules Card
                 Button {
                     WhitelistWindowManager.shared.show()
                 } label: {
@@ -161,7 +213,7 @@ struct ControlCenterView: View {
                 .buttonStyle(SpringButtonStyle(scale: 0.98))
                 .onHover { isHoveringWhitelist = $0 }
 
-                // MARK: - 4. Footer Actions
+                // MARK: - 5. Footer Actions
                 HStack(alignment: .center, spacing: 8) {
                     // Version Info
                     Text("v\(appVersion)")
@@ -177,7 +229,7 @@ struct ControlCenterView: View {
                         withAnimation {
                             showRestartToast = true
                         }
-                        manager.restart(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: whitelistRules)
+                        manager.restart(useProxy: useProxy, proxyPort: manager.activePort, rawWhitelistText: whitelistRules)
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
                             withAnimation {
