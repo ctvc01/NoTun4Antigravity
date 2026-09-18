@@ -15,7 +15,6 @@ struct ControlCenterView: View {
     @State private var isHoveringProxyCard = false
     @State private var isHoveringSpeedCard = false
     @State private var isHoveringWhitelist = false
-    @State private var isHoveringRemoteSshCard = false
     @State private var isHoveringRestart = false
     @State private var isHoveringQuit = false
     @State private var showRestartToast = false
@@ -80,7 +79,7 @@ struct ControlCenterView: View {
                 }
                 .padding(.horizontal, 4)
 
-                // MARK: - 2. Proxy Hub Card (Title + Port + Live Probe)
+                // MARK: - 2. Master Proxy & Auto Guard Hub
                 GlassCard(isHovered: isHoveringProxyCard) {
                     HStack(spacing: 11) {
                         ZStack {
@@ -88,35 +87,56 @@ struct ControlCenterView: View {
                                 .fill(useProxy ? Color.blue.opacity(0.16) : Color.secondary.opacity(0.12))
                                 .frame(width: 28, height: 28)
 
-                            Image(systemName: "globe.americas.fill")
+                            Image(systemName: useProxy ? "shield.lefthalf.filled" : "globe.americas.fill")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(useProxy ? Color.blue : Color.secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Antigravity代理")
-                                .font(.system(size: 12, weight: .semibold))
-
-                            // 副标题：状态圆点 + 端口 (自动感知) + 「修改」
                             HStack(spacing: 5) {
-                                Circle()
-                                    .fill(manager.isProxyPortReady ? Color.green : Color.orange)
-                                    .frame(width: 5, height: 5)
-                                    .shadow(color: manager.isProxyPortReady ? Color.green.opacity(0.6) : Color.orange.opacity(0.6), radius: 2)
+                                Text("全局代理与环境守护")
+                                    .font(.system(size: 12, weight: .semibold))
 
-                                Text("端口 \(String(manager.activePort))")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .monospacedDigit()
-                                    .foregroundColor(.secondary)
-
-                                Button {
-                                    ProxyPortWindowManager.shared.show()
-                                } label: {
-                                    Text("修改")
-                                        .font(.system(size: 10, weight: .medium))
+                                if useProxy {
+                                    Text("一键全通")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.blue.opacity(0.12))
                                         .foregroundColor(.blue)
+                                        .clipShape(Capsule())
                                 }
-                                .buttonStyle(.plain)
+                            }
+
+                            if useProxy {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(manager.isProxyPortReady ? Color.green : Color.orange)
+                                        .frame(width: 5, height: 5)
+                                        .shadow(color: manager.isProxyPortReady ? Color.green.opacity(0.6) : Color.orange.opacity(0.6), radius: 2)
+
+                                    Text("端口 \(String(manager.activePort))")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .monospacedDigit()
+                                        .foregroundColor(.secondary)
+
+                                    Button {
+                                        ProxyPortWindowManager.shared.show()
+                                    } label: {
+                                        Text("修改")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.blue)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Text("• 自动托管")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary.opacity(0.8))
+                                }
+                            } else {
+                                Text("已禁用代理 (直连干净模式)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
                             }
                         }
 
@@ -227,42 +247,6 @@ struct ControlCenterView: View {
                 }
                 .buttonStyle(SpringButtonStyle(scale: 0.98))
                 .onHover { isHoveringWhitelist = $0 }
-
-                // MARK: - 5. Remote SSH & IDE Assistant Card
-                Button {
-                    RemoteSshWindowManager.shared.show()
-                } label: {
-                    GlassCard(isHovered: isHoveringRemoteSshCard) {
-                        HStack(spacing: 11) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.indigo.opacity(0.16))
-                                    .frame(width: 28, height: 28)
-
-                                Image(systemName: "terminal.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(Color.indigo)
-                            }
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("远程开发与 SSH 保活助手")
-                                    .font(.system(size: 12, weight: .semibold))
-
-                                Text("SSH 防断连心跳 • 远程 Linux 代理置顶")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.secondary.opacity(0.7))
-                        }
-                    }
-                }
-                .buttonStyle(SpringButtonStyle(scale: 0.98))
-                .onHover { isHoveringRemoteSshCard = $0 }
 
                 // MARK: - 5. Footer Actions
                 HStack(alignment: .center, spacing: 8) {
@@ -394,6 +378,12 @@ struct ControlCenterView: View {
                     )
                     .padding(.bottom, 46)
                 }
+            }
+        }
+        .onChange(of: useProxy) { newValue in
+            AntigravityManager.syncLocalIdeProxySettings(useProxy: newValue, port: manager.activePort)
+            if newValue {
+                AntigravityManager.optimizeLocalSshKeepAlive()
             }
         }
     }

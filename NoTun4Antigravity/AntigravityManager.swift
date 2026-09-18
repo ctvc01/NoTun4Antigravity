@@ -391,17 +391,10 @@ final class AntigravityManager: ObservableObject {
         }
     }
 
-    // MARK: - Local SSH KeepAlive & Remote Linux Server Management
+    // MARK: - Local SSH KeepAlive (Silent Auto-Optimization)
 
-    nonisolated static func checkSshKeepAliveStatus() -> Bool {
-        let sshConfigUrl = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
-        guard let content = try? String(contentsOf: sshConfigUrl, encoding: .utf8) else {
-            return false
-        }
-        return content.contains("ServerAliveInterval")
-    }
-
-    nonisolated static func optimizeLocalSshKeepAlive() -> (success: Bool, message: String) {
+    @discardableResult
+    nonisolated static func optimizeLocalSshKeepAlive() -> Bool {
         let sshDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh")
         let sshConfigUrl = sshDir.appendingPathComponent("config")
 
@@ -411,7 +404,7 @@ final class AntigravityManager: ObservableObject {
 
         var content = (try? String(contentsOf: sshConfigUrl, encoding: .utf8)) ?? ""
         if content.contains("ServerAliveInterval") {
-            return (true, "本地 SSH 保活配置已生效 (ServerAliveInterval 15)")
+            return true
         }
 
         let keepAliveBlock = """
@@ -429,134 +422,9 @@ Host *
         do {
             try content.write(to: sshConfigUrl, atomically: true, encoding: .utf8)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sshConfigUrl.path)
-            return (true, "已向 ~/.ssh/config 成功注入心跳保活参数！")
+            return true
         } catch {
-            return (false, "写入失败: \(error.localizedDescription)")
-        }
-    }
-
-    nonisolated static func getKnownSshHosts() -> [String] {
-        let sshConfigUrl = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
-        guard let content = try? String(contentsOf: sshConfigUrl, encoding: .utf8) else {
-            return []
-        }
-
-        var hosts: [String] = []
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.lowercased().hasPrefix("host ") {
-                let parts = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-                for p in parts.dropFirst() {
-                    let h = p.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if h != "*" && !hosts.contains(h) {
-                        hosts.append(h)
-                    }
-                }
-            }
-        }
-        return hosts
-    }
-
-    nonisolated static func executeRemoteSshFix(target: String, proxyPort: Int) async -> (success: Bool, message: String) {
-        let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTarget.isEmpty else {
-            return (false, "SSH 目标不能为空")
-        }
-
-        let remoteScript = """
-PORT=\(proxyPort)
-PROXY_URL="http://127.0.0.1:${PORT}"
-SOCKS_URL="socks5://127.0.0.1:${PORT}"
-
-BASHRC="$HOME/.bashrc"
-if [ -f "$BASHRC" ]; then
-    grep -v -E "http_proxy|https_proxy|all_proxy|no_proxy|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|Antigravity.*Proxy" "$BASHRC" > "${BASHRC}.notun_tmp" 2>/dev/null || cat "$BASHRC" > "${BASHRC}.notun_tmp"
-    cat << 'EOF' > "$BASHRC"
-# === Antigravity & AI Proxy Config (MUST BE AT TOP) ===
-export HTTP_PROXY="http://127.0.0.1:\(proxyPort)"
-export HTTPS_PROXY="http://127.0.0.1:\(proxyPort)"
-export ALL_PROXY="socks5://127.0.0.1:\(proxyPort)"
-export http_proxy="http://127.0.0.1:\(proxyPort)"
-export https_proxy="http://127.0.0.1:\(proxyPort)"
-export all_proxy="socks5://127.0.0.1:\(proxyPort)"
-export NO_PROXY="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,*.local"
-export no_proxy="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,*.local"
-# ====================================================
-
-EOF
-    cat "${BASHRC}.notun_tmp" >> "$BASHRC"
-    rm -f "${BASHRC}.notun_tmp"
-    echo "[✔] ~/.bashrc 顶部代理已成功注入"
-fi
-
-for sub in User Machine; do
-    DIR="$HOME/.antigravity-ide-server/data/${sub}"
-    mkdir -p "$DIR" 2>/dev/null
-    FILE="${DIR}/settings.json"
-    if [ ! -f "$FILE" ]; then echo "{}" > "$FILE"; fi
-    python3 -c "
-import json
-p = '${FILE}'
-try:
-    with open(p, 'r') as f: d = json.load(f)
-except: d = {}
-d['http.proxy'] = '${PROXY_URL}'
-d['http.proxySupport'] = 'override'
-d['http.proxyStrictSSL'] = False
-with open(p, 'w') as f: json.dump(d, f, indent=2)
-" 2>/dev/null || true
-    echo "[✔] 远程 IDE 设置已更新: ${FILE}"
-done
-
-killall -9 language_server_linux_x64 antigravity-ide-server node 2>/dev/null || true
-echo "[✔] 远程旧版语言服务与服务器进程已重置"
-echo "🎉 远程服务器修复完成！"
-"""
-
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-                process.arguments = [
-                    "-o", "BatchMode=yes",
-                    "-o", "ConnectTimeout=8",
-                    "-o", "StrictHostKeyChecking=accept-new",
-                    trimmedTarget,
-                    "bash -s"
-                ]
-
-                let inPipe = Pipe()
-                let outPipe = Pipe()
-                let errPipe = Pipe()
-
-                process.standardInput = inPipe
-                process.standardOutput = outPipe
-                process.standardError = errPipe
-
-                do {
-                    try process.run()
-                    if let data = remoteScript.data(using: .utf8) {
-                        inPipe.fileHandleForWriting.write(data)
-                        try? inPipe.fileHandleForWriting.close()
-                    }
-                    process.waitUntilExit()
-
-                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stdoutStr = String(data: outData, encoding: .utf8) ?? ""
-                    let stderrStr = String(data: errData, encoding: .utf8) ?? ""
-
-                    if process.terminationStatus == 0 {
-                        let msg = stdoutStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(returning: (true, msg.isEmpty ? "远程服务器配置成功！" : msg))
-                    } else {
-                        let combinedErr = (stderrStr.isEmpty ? stdoutStr : stderrStr).trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(returning: (false, combinedErr.isEmpty ? "SSH 执行失败 (退出码 \(process.terminationStatus))" : combinedErr))
-                    }
-                } catch {
-                    continuation.resume(returning: (false, "无法调用 ssh: \(error.localizedDescription)"))
-                }
-            }
+            return false
         }
     }
 
@@ -638,6 +506,9 @@ echo "🎉 远程服务器修复完成！"
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
         Self.syncLocalIdeProxySettings(useProxy: useProxy, port: targetPort)
+        if useProxy {
+            Self.optimizeLocalSshKeepAlive()
+        }
 
         if isRunning, let app = findAntigravityApps().first {
             if #available(macOS 14.0, *) {
@@ -661,6 +532,9 @@ echo "🎉 远程服务器修复完成！"
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
         Self.syncLocalIdeProxySettings(useProxy: useProxy, port: targetPort)
+        if useProxy {
+            Self.optimizeLocalSshKeepAlive()
+        }
 
         Task {
             let runningApps = self.findAntigravityApps()
