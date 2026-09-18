@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct ProxyPortView: View {
+    var onBack: () -> Void
+
     @AppStorage("proxyPort") private var proxyPort: Int = AntigravityManager.defaultProxyPort
     @AppStorage("useProxy") private var useProxy: Bool = true
     @AppStorage("whitelistRules") private var whitelistRules: String = AntigravityManager.defaultWhitelistLines
@@ -20,75 +22,93 @@ struct ProxyPortView: View {
 
     var body: some View {
         ZStack {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.cyan.opacity(0.2))
-                            .frame(width: 34, height: 34)
-                        Image(systemName: "network")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.cyan)
+            VStack(alignment: .leading, spacing: 13) {
+                // MARK: - Navigation Header (Control Center Style)
+                HStack(spacing: 8) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.primary)
+                            .frame(width: 24, height: 24)
+                            .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                            )
                     }
+                    .buttonStyle(SpringButtonStyle(scale: 0.92))
+                    .keyboardShortcut(.cancelAction)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("代理端口设置 (Proxy Port)")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .tracking(-0.2)
-                        Text("配置拉起 Antigravity 时注入的本地代理监听端口")
-                            .font(.system(size: 11))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("代理端口设置")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                        Text("配置注入进程的本地代理端口")
+                            .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
+
+                    Spacer()
+
+                    Button("默认") {
+                        portInput = "\(AntigravityManager.defaultProxyPort)"
+                        testResult = nil
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(Capsule())
                 }
+                .padding(.horizontal, 2)
 
-                // Input & Health Check Card
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        Text("本地代理端口:")
-                            .font(.system(size: 12, weight: .medium))
+                // MARK: - Port Input & Health Card
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text("本地监听端口:")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
 
-                        TextField("例如 20890", text: $portInput)
+                        TextField("如 7890", text: $portInput)
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .monospacedDigit()
-                            .frame(width: 110)
+                            .frame(maxWidth: .infinity)
 
                         Button {
                             testConnection()
                         } label: {
-                            HStack(spacing: 4) {
+                            HStack(spacing: 3) {
                                 if isTesting {
                                     ProgressView()
                                         .controlSize(.small)
                                 } else {
                                     Image(systemName: "antenna.radiowaves.left.and.right")
                                 }
-                                Text("测试端口")
+                                Text("测试")
                             }
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 8)
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 7)
                             .padding(.vertical, 4)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color(NSColor.controlBackgroundColor))
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.8))
                             )
                         }
-                        .buttonStyle(SpringButtonStyle(scale: 0.96))
+                        .buttonStyle(SpringButtonStyle(scale: 0.95))
                         .disabled(isTesting)
                     }
 
                     if let result = testResult {
-                        HStack(spacing: 6) {
-                            Text(result)
-                                .font(.system(size: 11))
-                                .monospacedDigit()
-                        }
-                        .padding(.vertical, 2)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        Text(result)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(result.contains("🟢") ? .green : (result.contains("🔴") ? .red : .secondary))
+                            .lineLimit(2)
+                            .transition(.opacity)
                     }
                 }
-                .padding(12)
+                .padding(10)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
@@ -98,70 +118,51 @@ struct ProxyPortView: View {
                         )
                 )
 
-                // Bottom Action Buttons
-                HStack {
-                    Button("恢复默认 (20890)") {
-                        portInput = "\(AntigravityManager.defaultProxyPort)"
-                        testResult = nil
+                // MARK: - Save Action Button
+                Button {
+                    submitPort()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("保存并生效")
+                            .font(.system(size: 12, weight: .semibold))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 11))
-
-                    Spacer()
-
-                    Button("取消") {
-                        ProxyPortWindowManager.shared.close()
-                    }
-                    .buttonStyle(SpringButtonStyle())
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.6))
-                    )
-                    .keyboardShortcut(.cancelAction)
-
-                    Button("保存并生效") {
-                        submitPort()
-                    }
-                    .buttonStyle(SpringButtonStyle(scale: 0.96))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color.blue)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.8)
                             )
                     )
-                    .shadow(color: Color.blue.opacity(0.35), radius: 4, x: 0, y: 2)
-                    .keyboardShortcut(.defaultAction)
+                    .shadow(color: Color.blue.opacity(0.35), radius: 5, x: 0, y: 2)
                 }
-                .padding(.top, 4)
+                .buttonStyle(SpringButtonStyle(scale: 0.98))
+                .keyboardShortcut(.defaultAction)
             }
-            .padding(18)
-            .frame(width: 420, height: 210)
+            .padding(14)
+            .frame(width: 310)
 
             // MARK: - Toast Overlay
             if showToast {
                 VStack {
                     Spacer()
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                         Text(toastMessage)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
                     .background(.ultraThickMaterial)
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 3)
                     .overlay(
                         Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.8)
                     )
@@ -171,11 +172,10 @@ struct ProxyPortView: View {
                             removal: .scale(scale: 0.96).combined(with: .opacity).animation(.easeOut(duration: 0.15))
                         )
                     )
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 2)
                 }
             }
         }
-        .background(.ultraThinMaterial)
         .onAppear {
             portInput = String(proxyPort)
             testConnection()
@@ -185,7 +185,7 @@ struct ProxyPortView: View {
     private func testConnection() {
         let filtered = portInput.filter { "0123456789".contains($0) }
         guard let p = Int(filtered), p > 0, p <= 65535 else {
-            testResult = "⚠️ 请输入有效的端口号 (1~65535)"
+            testResult = "⚠️ 请输入有效端口 (1~65535)"
             return
         }
 
@@ -195,7 +195,7 @@ struct ProxyPortView: View {
             let isOpen = AntigravityManager.isPortOpen(port: p)
             DispatchQueue.main.async {
                 self.isTesting = false
-                self.testResult = isOpen ? "🟢 端口就绪 (127.0.0.1:\(p) 正在监听)" : "🔴 未检测到服务，请确认代理软件已启动"
+                self.testResult = isOpen ? "🟢 端口就绪 (127.0.0.1:\(p) 正在监听)" : "🔴 未检测到服务，请确认代理客户端已启动"
             }
         }
     }
@@ -203,7 +203,7 @@ struct ProxyPortView: View {
     private func submitPort() {
         let filtered = portInput.filter { "0123456789".contains($0) }
         guard let p = Int(filtered), p > 0, p <= 65535 else {
-            testResult = "⚠️ 请输入有效的端口号 (1~65535)"
+            testResult = "⚠️ 请输入有效端口 (1~65535)"
             return
         }
 
@@ -212,22 +212,20 @@ struct ProxyPortView: View {
 
         if manager.isRunning {
             manager.restart(useProxy: useProxy, proxyPort: p, rawWhitelistText: whitelistRules)
-            toastMessage = "端口已保存为 \(p)，正在重启 Antigravity 生效..."
+            toastMessage = "端口已设为 \(p)，正在重启生效"
         } else {
-            toastMessage = "端口已保存为 \(p)，下次启动时生效。"
+            toastMessage = "端口已设为 \(p)，启动时生效"
         }
 
         withAnimation {
             showToast = true
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
             withAnimation {
                 showToast = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                ProxyPortWindowManager.shared.close()
-            }
+            onBack()
         }
     }
 }

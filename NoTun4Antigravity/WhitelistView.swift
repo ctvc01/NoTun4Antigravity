@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct WhitelistView: View {
+    var onBack: () -> Void
+
     @AppStorage("whitelistRules") private var whitelistRules: String = AntigravityManager.defaultWhitelistLines
     @AppStorage("proxyPort") private var proxyPort: Int = AntigravityManager.defaultProxyPort
     @AppStorage("useProxy") private var useProxy: Bool = true
@@ -18,110 +20,112 @@ struct WhitelistView: View {
 
     var body: some View {
         ZStack {
-            VStack(alignment: .leading, spacing: 14) {
-                // Header
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.blue.opacity(0.16))
-                            .frame(width: 32, height: 32)
-                        Image(systemName: "shield.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.blue)
+            VStack(alignment: .leading, spacing: 11) {
+                // MARK: - Navigation Header (Control Center Style)
+                HStack(spacing: 8) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.primary)
+                            .frame(width: 24, height: 24)
+                            .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                            )
                     }
+                    .buttonStyle(SpringButtonStyle(scale: 0.92))
+                    .keyboardShortcut(.cancelAction)
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text("直连白名单规则")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .tracking(-0.2)
-                        Text("匹配的域名或 IP 将不走本地代理，保证公司内网直连")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                        Text("跳过代理直接走物理网卡")
+                            .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
-                }
 
-                // Editor Box with Glassmorphism Card
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("规则列表 (每行一条规则):")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
+                    Spacer()
 
-                    TextEditor(text: $editorContent)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .padding(8)
-                        .background(Color(NSColor.textBackgroundColor).opacity(0.6))
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
-                        )
-                }
-
-                // Bottom Actions
-                HStack(alignment: .center) {
-                    Button("清空规则") {
+                    Button("清空") {
                         editorContent = ""
                     }
                     .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.secondary)
-                    .font(.system(size: 11))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                    .clipShape(Capsule())
+                }
+                .padding(.horizontal, 2)
 
-                    Spacer()
+                // MARK: - Rules Editor
+                VStack(alignment: .leading, spacing: 6) {
+                    TextEditor(text: $editorContent)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .frame(height: 135)
+                        .padding(6)
+                        .background(Color(NSColor.textBackgroundColor).opacity(0.45))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                        )
 
-                    Button("取消") {
-                        WhitelistWindowManager.shared.close()
+                    Text("支持每行一条: *.internal, 10.0.0.0/8, 公司内网等")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.8))
+                        .padding(.leading, 2)
+                }
+
+                // MARK: - Save Action
+                Button {
+                    submitRules()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("保存并应用规则")
+                            .font(.system(size: 12, weight: .semibold))
                     }
-                    .buttonStyle(SpringButtonStyle())
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.6))
-                    )
-                    .keyboardShortcut(.cancelAction)
-
-                    Button("保存并应用") {
-                        submitRules()
-                    }
-                    .buttonStyle(SpringButtonStyle(scale: 0.96))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color.blue)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.8)
                             )
                     )
-                    .shadow(color: Color.blue.opacity(0.35), radius: 4, x: 0, y: 2)
-                    .keyboardShortcut(.defaultAction)
+                    .shadow(color: Color.blue.opacity(0.35), radius: 5, x: 0, y: 2)
                 }
-                .padding(.top, 4)
+                .buttonStyle(SpringButtonStyle(scale: 0.98))
+                .keyboardShortcut(.defaultAction)
             }
-            .padding(18)
-            .frame(width: 460, height: 380)
+            .padding(14)
+            .frame(width: 310)
 
-            // MARK: - Toast Overlay
+            // MARK: - Toast Feedback
             if showToast {
                 VStack {
                     Spacer()
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                         Text(toastMessage)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
                     .background(.ultraThickMaterial)
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 3)
                     .overlay(
-                        Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.8)
                     )
                     .transition(
                         .asymmetric(
@@ -129,11 +133,10 @@ struct WhitelistView: View {
                             removal: .scale(scale: 0.96).combined(with: .opacity).animation(.easeOut(duration: 0.15))
                         )
                     )
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 2)
                 }
             }
         }
-        .background(.ultraThinMaterial)
         .onAppear {
             editorContent = whitelistRules
         }
@@ -144,22 +147,20 @@ struct WhitelistView: View {
 
         if manager.isRunning {
             manager.restart(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: editorContent)
-            toastMessage = "白名单已保存，正在重启 Antigravity 生效..."
+            toastMessage = "白名单已应用，正在重启生效"
         } else {
-            toastMessage = "白名单已保存，下次启动时生效。"
+            toastMessage = "白名单已保存，下次启动时生效"
         }
 
         withAnimation {
             showToast = true
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
             withAnimation {
                 showToast = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                WhitelistWindowManager.shared.close()
-            }
+            onBack()
         }
     }
 }

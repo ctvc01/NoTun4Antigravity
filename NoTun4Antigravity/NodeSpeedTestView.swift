@@ -22,6 +22,8 @@ struct TestedNodeItem: Identifiable, Equatable {
 }
 
 struct NodeSpeedTestView: View {
+    var onBack: () -> Void
+
     @ObservedObject var manager = AntigravityManager.shared
 
     @AppStorage("savedSubscriptionUrl") private var savedSubscriptionUrl: String = ""
@@ -57,323 +59,255 @@ struct NodeSpeedTestView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .leading, spacing: 12) {
-                // MARK: - Header
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.orange.opacity(0.18))
-                            .frame(width: 32, height: 32)
-                        Image(systemName: "speedometer")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.orange)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            // MARK: - Navigation Header (Control Center Style)
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 24, height: 24)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(SpringButtonStyle(scale: 0.92))
+                .keyboardShortcut(.cancelAction)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("节点真机可用性与测速筛选")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .tracking(-0.2)
-                        Text("实测 Google 网页与 Antigravity AI 服务端真实延迟，按速度优选稳定专线")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("节点真机测速与筛选")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Text("实测 Google 网页与 AI 服务端真实延迟")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    manager.probeCurrentNodeHealth()
+                } label: {
+                    HStack(spacing: 3) {
+                        if manager.nodeHealth.isChecking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Text("体检")
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(manager.nodeHealth.isChecking)
+            }
+            .padding(.horizontal, 2)
+
+            // MARK: - 1. 当前连接节点实时体检卡片 (紧凑型)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    // Google 网页状态
+                    Circle()
+                        .fill(manager.nodeHealth.googleLatencyMs != nil ? Color.green : Color.red)
+                        .frame(width: 6, height: 6)
+                    Text("Google:")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    if let ms = manager.nodeHealth.googleLatencyMs {
+                        Text("\(ms)ms")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.green)
+                    } else {
+                        Text("断开")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.red)
                     }
 
                     Spacer()
 
-                    Button {
-                        NodeSpeedTestWindowManager.shared.close()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // MARK: - 1. 当前连接节点实时体检卡片
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("当前活跃代理 (端口: \(manager.activePort))")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        Button {
-                            manager.probeCurrentNodeHealth()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if manager.nodeHealth.isChecking {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "arrow.triangle.2.circlepath")
-                                }
-                                Text("立即体检")
-                            }
-                            .font(.system(size: 10, weight: .medium))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule().fill(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(manager.nodeHealth.isChecking)
+                    // Antigravity AI 服务状态
+                    Circle()
+                        .fill(manager.nodeHealth.isAntigravityReady ? Color.green : Color.red)
+                        .frame(width: 6, height: 6)
+                    Text("AI服务:")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    if let ms = manager.nodeHealth.antigravityLatencyMs {
+                        Text("\(ms)ms")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.green)
                     }
 
-                    HStack(spacing: 12) {
-                        // Google 网页状态
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(manager.nodeHealth.googleLatencyMs != nil ? Color.green : Color.red)
-                                .frame(width: 7, height: 7)
-                            Text("Google 网页:")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            if let ms = manager.nodeHealth.googleLatencyMs {
-                                Text("\(ms)ms")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(.green)
-                            } else {
-                                Text("断开/无法连接")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.red)
-                            }
-                        }
-
-                        Divider().frame(height: 12)
-
-                        // Antigravity AI 服务状态 (三矩阵: Gemini + CloudCode + OAuth2)
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(manager.nodeHealth.isAntigravityReady ? Color.green : Color.red)
-                                .frame(width: 7, height: 7)
-                            Text("AI服务:")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            if let ms = manager.nodeHealth.antigravityLatencyMs {
-                                Text("\(ms)ms")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(.green)
-                            }
-
-                            if manager.nodeHealth.isMatrixAllReady {
-                                Text("矩阵全绿")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1.5)
-                                    .background(Capsule().fill(Color.green.opacity(0.18)))
-                                    .foregroundColor(.green)
-                            } else if manager.nodeHealth.isAntigravityReady {
-                                if !manager.nodeHealth.isOAuthReady {
-                                    Text("OAuth受限")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1.5)
-                                        .background(Capsule().fill(Color.orange.opacity(0.18)))
-                                        .foregroundColor(.orange)
-                                }
-                                if !manager.nodeHealth.isCloudCodeReady {
-                                    Text("CloudCode受阻")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1.5)
-                                        .background(Capsule().fill(Color.red.opacity(0.18)))
-                                        .foregroundColor(.red)
-                                }
-                            } else {
-                                Text("🔴 受限/被拦截")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.red)
-                            }
-                        }
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(manager.nodeHealth.isOverallReady ? Color.green.opacity(0.3) : Color.red.opacity(0.3), lineWidth: 0.8)
-                            )
-                    )
-
-                    if let err = manager.nodeHealth.errorMessage, !manager.nodeHealth.isChecking {
-                        Text("⚠️ 诊断提示：\(err)，建议切换为下方带有【Gemini】或【AI-Prime】标签的高稳节点")
-                            .font(.system(size: 10))
+                    if manager.nodeHealth.isMatrixAllReady {
+                        Text("全通")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.green.opacity(0.18)))
+                            .foregroundColor(.green)
+                    } else if !manager.nodeHealth.isOAuthReady && manager.nodeHealth.isAntigravityReady {
+                        Text("OAuth受限")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.18)))
                             .foregroundColor(.orange)
-                            .padding(.horizontal, 2)
-                    } else if !manager.nodeHealth.isOverallReady && !manager.nodeHealth.isChecking {
-                        Text("⚠️ 提示：当前代理节点无法直连 Google 服务，请在下方列表选择带有【Gemini】或【AI-Prime】标签的节点并在客户端中切换")
-                            .font(.system(size: 10))
-                            .foregroundColor(.orange)
-                            .padding(.horizontal, 2)
-                    }
-                }
-
-                // MARK: - 2. 订阅解析与智能筛选输入区
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        TextField("粘贴 Shadowrocket / Trojan / Clash 订阅链接...", text: $subscriptionUrl)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 11))
-
-                        Button {
-                            loadSubscription()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if isLoadingSubscription {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "arrow.down.circle.fill")
-                                }
-                                Text(isLoadingSubscription ? "解析中..." : "解析节点")
-                            }
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6).fill(Color.blue)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isLoadingSubscription || subscriptionUrl.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                        if !parsedNodes.isEmpty {
-                            Button {
-                                testAllNodesSpeed()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    if isSpeedTestingAll {
-                                        ProgressView().controlSize(.small)
-                                    } else {
-                                        Image(systemName: "bolt.fill")
-                                    }
-                                    Text(isSpeedTestingAll ? "测速中..." : "一键测速")
-                                }
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6).fill(Color.orange)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isSpeedTestingAll)
-                        }
-                    }
-
-                    if let err = fetchErrorMessage {
-                        Text(err)
-                            .font(.system(size: 10))
+                    } else if !manager.nodeHealth.isAntigravityReady {
+                        Text("受限")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red.opacity(0.18)))
                             .foregroundColor(.red)
                     }
+                }
 
-                    // 过滤器与排序控制栏
-                    HStack(spacing: 12) {
-                        Toggle(isOn: $onlyShowGeminiRecommended) {
-                            Text("⭐ 仅高亮 AI / Gemini 专线")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
+                if let err = manager.nodeHealth.errorMessage, !manager.nodeHealth.isChecking {
+                    Text("⚠️ \(err)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.orange)
+                        .lineLimit(1)
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(manager.nodeHealth.isOverallReady ? Color.green.opacity(0.25) : Color.red.opacity(0.25), lineWidth: 0.8)
+                    )
+            )
+
+            // MARK: - 2. 订阅解析与测速操作栏
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    TextField("粘贴订阅链接...", text: $subscriptionUrl)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10))
+
+                    Button {
+                        loadSubscription()
+                    } label: {
+                        HStack(spacing: 2) {
+                            if isLoadingSubscription {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                            }
+                            Text(isLoadingSubscription ? "..." : "解析")
                         }
-                        .toggleStyle(.checkbox)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.blue)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingSubscription || subscriptionUrl.trimmingCharacters(in: .whitespaces).isEmpty)
 
-                        Toggle(isOn: $sortBySpeed) {
-                            Text("⚡ 按速度由快到慢排序")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
+                    if !parsedNodes.isEmpty {
+                        Button {
+                            testAllNodesSpeed()
+                        } label: {
+                            HStack(spacing: 2) {
+                                if isSpeedTestingAll {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "bolt.fill")
+                                }
+                                Text(isSpeedTestingAll ? "..." : "测速")
+                            }
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.orange)
+                            )
                         }
-                        .toggleStyle(.checkbox)
-
-                        Spacer()
-
-                        if !parsedNodes.isEmpty {
-                            let readyCount = parsedNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
-                            Text("共 \(parsedNodes.count) 节点 | 已测速 \(readyCount)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.secondary)
-                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSpeedTestingAll)
                     }
                 }
 
-                // MARK: - 3. 节点列表展示 (包含实测速度与推荐标签)
-                ScrollView {
-                    VStack(spacing: 6) {
-                        if filteredNodes.isEmpty {
-                            VStack(spacing: 8) {
-                                Image(systemName: "list.bullet.rectangle.portrait")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.secondary.opacity(0.5))
-                                Text(parsedNodes.isEmpty ? "输入上方订阅链接点击「解析节点」，即可实测节点连接速度并标出 Antigravity 专线" : "暂无符合筛选条件的节点，请取消勾选仅高亮专线查看全部")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 20)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 150)
-                        } else {
-                            ForEach(filteredNodes) { node in
-                                HStack(spacing: 8) {
-                                    // 节点名称
-                                    Text(node.name)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .lineLimit(1)
+                if let err = fetchErrorMessage {
+                    Text(err)
+                        .font(.system(size: 9))
+                        .foregroundColor(.red)
+                        .lineLimit(1)
+                }
 
-                                    Spacer()
+                // 筛选栏
+                HStack(spacing: 8) {
+                    Toggle(isOn: $onlyShowGeminiRecommended) {
+                        Text("仅专线")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .toggleStyle(.checkbox)
 
-                                    // 标签徽章
-                                    if node.isGeminiDedicated {
-                                        Text("Gemini专用")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.purple.opacity(0.18)))
-                                            .foregroundColor(.purple)
-                                    }
+                    Spacer()
 
-                                    if node.isAIPrime {
-                                        Text("AI-Prime")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.blue.opacity(0.18)))
-                                            .foregroundColor(.blue)
-                                    }
+                    if !parsedNodes.isEmpty {
+                        let readyCount = parsedNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
+                        Text("\(parsedNodes.count) 节点 | 已测 \(readyCount)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
 
-                                    if node.isResidential {
-                                        Text("家宽")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.green.opacity(0.18)))
-                                            .foregroundColor(.green)
-                                    }
+            // MARK: - 3. 节点垂直列表 (类似 macOS Wi-Fi 列表)
+            ScrollView {
+                VStack(spacing: 4) {
+                    if filteredNodes.isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: "list.bullet.rectangle.portrait")
+                                .font(.system(size: 18))
+                                .foregroundColor(.secondary.opacity(0.4))
+                            Text(parsedNodes.isEmpty ? "输入上方订阅链接点击「解析」，即可在此实测节点速度" : "暂无符合筛选条件的节点")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 10)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                    } else {
+                        ForEach(filteredNodes) { node in
+                            HStack(spacing: 6) {
+                                Text(node.name)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
 
-                                    // 实测实际速度展示 (ms)
-                                    if node.isTesting {
-                                        HStack(spacing: 3) {
-                                            ProgressView().controlSize(.mini)
-                                            Text("测速中")
-                                                .font(.system(size: 9))
-                                                .foregroundColor(.secondary)
-                                        }
+                                Spacer()
+
+                                if node.isGeminiDedicated || node.isAIPrime {
+                                    Text("专线")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.purple.opacity(0.18)))
+                                        .foregroundColor(.purple)
+                                }
+
+                                if node.isTesting {
+                                    ProgressView().controlSize(.mini)
+                                } else if let ms = node.latencyMs {
+                                    let isFast = ms < 180
+                                    let isMedium = ms < 350
+                                    Text("\(ms)ms")
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                         .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                    } else if let ms = node.latencyMs {
-                                        let isFast = ms < 180
-                                        let isMedium = ms < 350
-                                        HStack(spacing: 2) {
-                                            Image(systemName: "bolt.fill")
-                                                .font(.system(size: 8))
-                                            Text("\(ms)ms")
-                                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                        }
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
+                                        .padding(.vertical, 1.5)
                                         .background(
                                             Capsule().fill(
                                                 isFast ? Color.green.opacity(0.18) :
@@ -381,60 +315,42 @@ struct NodeSpeedTestView: View {
                                             )
                                         )
                                         .foregroundColor(isFast ? .green : (isMedium ? .blue : .orange))
-                                    } else if node.hasTested {
-                                        Text("超时")
-                                            .font(.system(size: 9, weight: .medium))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.red.opacity(0.15)))
-                                            .foregroundColor(.red)
-                                    }
-
-                                    // 复制按钮
-                                    Button {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(node.name, forType: .string)
-                                        copiedNodeName = node.name
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                                            copiedNodeName = nil
-                                        }
-                                    } label: {
-                                        HStack(spacing: 3) {
-                                            Image(systemName: copiedNodeName == node.name ? "checkmark" : "doc.on.doc")
-                                            Text(copiedNodeName == node.name ? "已复制" : "复制")
-                                        }
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(copiedNodeName == node.name ? .green : .blue)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(
-                                            Capsule().fill(Color(NSColor.controlBackgroundColor))
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("复制节点全名，方便在客户端中快速搜索切换")
+                                } else if node.hasTested {
+                                    Text("超时")
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundColor(.red)
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color(NSColor.controlBackgroundColor).opacity((node.isGeminiDedicated || node.isAIPrime) ? 0.75 : 0.4))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke((node.isGeminiDedicated || node.isAIPrime) ? Color.purple.opacity(0.4) : Color.clear, lineWidth: 0.8)
-                                        )
-                                )
+
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(node.name, forType: .string)
+                                    copiedNodeName = node.name
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                        copiedNodeName = nil
+                                    }
+                                } label: {
+                                    Image(systemName: copiedNodeName == node.name ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(copiedNodeName == node.name ? .green : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("复制节点全名")
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.45))
+                            )
                         }
                     }
-                    .padding(.trailing, 2)
                 }
-                .frame(height: 190)
+                .padding(.trailing, 2)
             }
-            .padding(18)
-            .frame(width: 520, height: 460)
+            .frame(height: 170)
         }
-        .background(.ultraThinMaterial)
+        .padding(14)
+        .frame(width: 310)
         .onAppear {
             if !savedSubscriptionUrl.isEmpty {
                 subscriptionUrl = savedSubscriptionUrl
