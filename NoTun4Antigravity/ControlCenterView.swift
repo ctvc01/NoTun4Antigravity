@@ -15,6 +15,7 @@ struct ControlCenterView: View {
     @State private var isHoveringProxyCard = false
     @State private var isHoveringSpeedCard = false
     @State private var isHoveringWhitelist = false
+    @State private var isHoveringRemoteSshCard = false
     @State private var isHoveringRestart = false
     @State private var isHoveringQuit = false
     @State private var showRestartToast = false
@@ -28,9 +29,9 @@ struct ControlCenterView: View {
             .count
     }
 
-    // 动态读取版本号，默认 1.2
+    // 动态读取版本号，默认 1.3
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.3"
     }
 
     var body: some View {
@@ -148,16 +149,30 @@ struct ControlCenterView: View {
 
                                 HStack(spacing: 6) {
                                     if manager.nodeHealth.isChecking {
-                                        Text("正在探测节点可用性...")
+                                        Text("正在探测 AI 矩阵链路...")
                                             .font(.system(size: 10))
                                             .foregroundColor(.secondary)
-                                    } else if let ms = manager.nodeHealth.googleLatencyMs {
-                                        Text("Google: \(ms)ms")
+                                    } else if let ms = manager.nodeHealth.antigravityLatencyMs {
+                                        Text("AI: \(ms)ms")
                                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                                             .foregroundColor(.green)
-                                        Text(manager.nodeHealth.isAntigravityReady ? "• AI就绪" : "• AI受限")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(manager.nodeHealth.isAntigravityReady ? .green : .orange)
+                                        if manager.nodeHealth.isMatrixAllReady {
+                                            Text("• 矩阵全通")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundColor(.green)
+                                        } else if !manager.nodeHealth.isOAuthReady {
+                                            Text("• OAuth受限")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundColor(.orange)
+                                        } else {
+                                            Text("• 基础就绪")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundColor(.green)
+                                        }
+                                    } else if let ms = manager.nodeHealth.googleLatencyMs {
+                                        Text("Google: \(ms)ms • 网页通畅")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.green)
                                     } else {
                                         Text("节点未连通 / 需测速")
                                             .font(.system(size: 10))
@@ -212,6 +227,42 @@ struct ControlCenterView: View {
                 }
                 .buttonStyle(SpringButtonStyle(scale: 0.98))
                 .onHover { isHoveringWhitelist = $0 }
+
+                // MARK: - 5. Remote SSH & IDE Assistant Card
+                Button {
+                    RemoteSshWindowManager.shared.show()
+                } label: {
+                    GlassCard(isHovered: isHoveringRemoteSshCard) {
+                        HStack(spacing: 11) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.indigo.opacity(0.16))
+                                    .frame(width: 28, height: 28)
+
+                                Image(systemName: "terminal.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(Color.indigo)
+                            }
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("远程开发与 SSH 保活助手")
+                                    .font(.system(size: 12, weight: .semibold))
+
+                                Text("SSH 防断连心跳 • 远程 Linux 代理置顶")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.7))
+                        }
+                    }
+                }
+                .buttonStyle(SpringButtonStyle(scale: 0.98))
+                .onHover { isHoveringRemoteSshCard = $0 }
 
                 // MARK: - 5. Footer Actions
                 HStack(alignment: .center, spacing: 8) {

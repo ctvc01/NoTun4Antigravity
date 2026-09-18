@@ -144,22 +144,44 @@ struct NodeSpeedTestView: View {
 
                         Divider().frame(height: 12)
 
-                        // Antigravity AI 服务状态
-                        HStack(spacing: 6) {
+                        // Antigravity AI 服务状态 (三矩阵: Gemini + CloudCode + OAuth2)
+                        HStack(spacing: 5) {
                             Circle()
                                 .fill(manager.nodeHealth.isAntigravityReady ? Color.green : Color.red)
                                 .frame(width: 7, height: 7)
-                            Text("Antigravity AI:")
+                            Text("AI服务:")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                             if let ms = manager.nodeHealth.antigravityLatencyMs {
-                                Text("\(ms)ms (畅通)")
+                                Text("\(ms)ms")
                                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                     .foregroundColor(.green)
-                            } else if manager.nodeHealth.isAntigravityReady {
-                                Text("🟢 畅通就绪")
-                                    .font(.system(size: 11, weight: .medium))
+                            }
+
+                            if manager.nodeHealth.isMatrixAllReady {
+                                Text("矩阵全绿")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1.5)
+                                    .background(Capsule().fill(Color.green.opacity(0.18)))
                                     .foregroundColor(.green)
+                            } else if manager.nodeHealth.isAntigravityReady {
+                                if !manager.nodeHealth.isOAuthReady {
+                                    Text("OAuth受限")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                                        .foregroundColor(.orange)
+                                }
+                                if !manager.nodeHealth.isCloudCodeReady {
+                                    Text("CloudCode受阻")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(Color.red.opacity(0.18)))
+                                        .foregroundColor(.red)
+                                }
                             } else {
                                 Text("🔴 受限/被拦截")
                                     .font(.system(size: 11, weight: .medium))
@@ -178,7 +200,12 @@ struct NodeSpeedTestView: View {
                             )
                     )
 
-                    if !manager.nodeHealth.isOverallReady && !manager.nodeHealth.isChecking {
+                    if let err = manager.nodeHealth.errorMessage, !manager.nodeHealth.isChecking {
+                        Text("⚠️ 诊断提示：\(err)，建议切换为下方带有【Gemini】或【AI-Prime】标签的高稳节点")
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 2)
+                    } else if !manager.nodeHealth.isOverallReady && !manager.nodeHealth.isChecking {
                         Text("⚠️ 提示：当前代理节点无法直连 Google 服务，请在下方列表选择带有【Gemini】或【AI-Prime】标签的节点并在客户端中切换")
                             .font(.system(size: 10))
                             .foregroundColor(.orange)

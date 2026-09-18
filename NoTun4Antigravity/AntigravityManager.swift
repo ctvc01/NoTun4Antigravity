@@ -11,13 +11,19 @@ import Combine
 struct NodeHealthStatus: Equatable {
     var isChecking: Bool = false
     var googleLatencyMs: Int? = nil          // Google 网页实际速度
-    var antigravityLatencyMs: Int? = nil     // Antigravity AI 服务实际速度
-    var isAntigravityReady: Bool = false
+    var antigravityLatencyMs: Int? = nil     // Antigravity Gemini AI 服务实际速度
+    var isAntigravityReady: Bool = false     // Gemini API
+    var isCloudCodeReady: Bool = false       // daily-cloudcode-pa.googleapis.com
+    var isOAuthReady: Bool = false           // oauth2.googleapis.com (Token & TLS)
     var errorMessage: String? = nil
     var lastChecked: Date? = nil
 
     var isOverallReady: Bool {
-        isAntigravityReady || (googleLatencyMs != nil)
+        (isAntigravityReady || isCloudCodeReady || (googleLatencyMs != nil)) && (isOAuthReady || isAntigravityReady)
+    }
+
+    var isMatrixAllReady: Bool {
+        isAntigravityReady && isCloudCodeReady && isOAuthReady
     }
 }
 
@@ -250,7 +256,7 @@ final class AntigravityManager: ObservableObject {
         ]
         let session = URLSession(configuration: config)
 
-        // 1. 实测 Antigravity Gemini AI 服务端到端实际速度
+        // 1. 实测 Antigravity Gemini AI 服务端到端实际速度 (通道1: generativelanguage.googleapis.com)
         var antigravitySpeed: Int? = nil
         var antigravityReady = false
         let startAI = CFAbsoluteTimeGetCurrent()
@@ -259,7 +265,6 @@ final class AntigravityManager: ObservableObject {
                 let (_, response) = try await session.data(from: url)
                 let elapsed = Int((CFAbsoluteTimeGetCurrent() - startAI) * 1000)
                 if let http = response as? HTTPURLResponse {
-                    // 状态码为 200, 404, 400, 401 表明成功抵达 Google AI 服务器未被阻断
                     if http.statusCode == 200 || http.statusCode == 404 || http.statusCode == 400 || http.statusCode == 401 {
                         antigravityReady = true
                         antigravitySpeed = elapsed
@@ -270,7 +275,37 @@ final class AntigravityManager: ObservableObject {
             }
         }
 
-        // 2. 实测 Google 网页连通性 (204 往返真实延迟)
+        // 2. 实测 CloudCode / Agent 调度核心流 (通道2: daily-cloudcode-pa.googleapis.com)
+        var cloudCodeReady = false
+        if let url = URL(string: "https://daily-cloudcode-pa.googleapis.com") {
+            do {
+                let (_, response) = try await session.data(from: url)
+                if let http = response as? HTTPURLResponse {
+                    if http.statusCode == 200 || http.statusCode == 404 || http.statusCode == 400 || http.statusCode == 401 || http.statusCode == 403 {
+                        cloudCodeReady = true
+                    }
+                }
+            } catch {
+                cloudCodeReady = false
+            }
+        }
+
+        // 3. 实测 OAuth2 令牌刷新与 TLS 握手完整性 (通道3: oauth2.googleapis.com)
+        var oauthReady = false
+        if let url = URL(string: "https://oauth2.googleapis.com") {
+            do {
+                let (_, response) = try await session.data(from: url)
+                if let http = response as? HTTPURLResponse {
+                    if http.statusCode >= 200 && http.statusCode < 500 {
+                        oauthReady = true
+                    }
+                }
+            } catch {
+                oauthReady = false
+            }
+        }
+
+        // 4. 实测 Google 网页连通性 (204 往返真实延迟)
         var googleSpeed: Int? = nil
         let startGoogle = CFAbsoluteTimeGetCurrent()
         let probeUrls = [
@@ -292,21 +327,237 @@ final class AntigravityManager: ObservableObject {
             }
         }
 
-        // 若 Antigravity 通畅，但网页探测因节点分流规则暂未响应，以 Antigravity 为准回填
         if antigravityReady && googleSpeed == nil {
             googleSpeed = antigravitySpeed
         }
 
-        let errMsg: String? = (googleSpeed == nil && !antigravityReady) ? "无法连接 Google 与 AI 节点" : nil
+        var errMsg: String? = nil
+        if googleSpeed == nil && !antigravityReady {
+            errMsg = "无法连接 Google 与 AI 节点"
+        } else if !oauthReady && antigravityReady {
+            errMsg = "OAuth2 握手异常或被拦截 (Agent 任务易中断)"
+        } else if !cloudCodeReady && antigravityReady {
+            errMsg = "CloudCode 调度流受限"
+        }
 
         return NodeHealthStatus(
             isChecking: false,
             googleLatencyMs: googleSpeed,
             antigravityLatencyMs: antigravitySpeed,
             isAntigravityReady: antigravityReady,
+            isCloudCodeReady: cloudCodeReady,
+            isOAuthReady: oauthReady,
             errorMessage: errMsg,
             lastChecked: Date()
         )
+    }
+
+    // MARK: - Local IDE settings.json Anti-Conflict Synchronization
+
+    nonisolated static func syncLocalIdeProxySettings(useProxy: Bool, port: Int) {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidatePaths = [
+            home.appendingPathComponent("Library/Application Support/Antigravity/User/settings.json"),
+            home.appendingPathComponent("Library/Application Support/Antigravity IDE/User/settings.json")
+        ]
+
+        for fileUrl in candidatePaths {
+            let dirUrl = fileUrl.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: dirUrl.path) {
+                continue
+            }
+
+            var jsonDict: [String: Any] = [:]
+            if FileManager.default.fileExists(atPath: fileUrl.path),
+               let data = try? Data(contentsOf: fileUrl),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                jsonDict = obj
+            }
+
+            if useProxy {
+                let proxyUrl = "http://127.0.0.1:\(port)"
+                jsonDict["http.proxy"] = proxyUrl
+                jsonDict["http.proxySupport"] = "override"
+                jsonDict["http.proxyStrictSSL"] = false
+            } else {
+                jsonDict.removeValue(forKey: "http.proxy")
+                jsonDict.removeValue(forKey: "http.proxySupport")
+                jsonDict.removeValue(forKey: "http.proxyStrictSSL")
+            }
+
+            if let outData = try? JSONSerialization.data(withJSONObject: jsonDict, options: [.prettyPrinted, .sortedKeys]) {
+                try? outData.write(to: fileUrl, options: .atomic)
+            }
+        }
+    }
+
+    // MARK: - Local SSH KeepAlive & Remote Linux Server Management
+
+    nonisolated static func checkSshKeepAliveStatus() -> Bool {
+        let sshConfigUrl = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
+        guard let content = try? String(contentsOf: sshConfigUrl, encoding: .utf8) else {
+            return false
+        }
+        return content.contains("ServerAliveInterval")
+    }
+
+    nonisolated static func optimizeLocalSshKeepAlive() -> (success: Bool, message: String) {
+        let sshDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh")
+        let sshConfigUrl = sshDir.appendingPathComponent("config")
+
+        if !FileManager.default.fileExists(atPath: sshDir.path) {
+            try? FileManager.default.createDirectory(at: sshDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+
+        var content = (try? String(contentsOf: sshConfigUrl, encoding: .utf8)) ?? ""
+        if content.contains("ServerAliveInterval") {
+            return (true, "本地 SSH 保活配置已生效 (ServerAliveInterval 15)")
+        }
+
+        let keepAliveBlock = """
+
+# === Antigravity & Remote-SSH KeepAlive (Added by NoTun) ===
+Host *
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+    IPQoS lowdelay throughput
+# ==========================================================
+
+"""
+        content.append(keepAliveBlock)
+        do {
+            try content.write(to: sshConfigUrl, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sshConfigUrl.path)
+            return (true, "已向 ~/.ssh/config 成功注入心跳保活参数！")
+        } catch {
+            return (false, "写入失败: \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func getKnownSshHosts() -> [String] {
+        let sshConfigUrl = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
+        guard let content = try? String(contentsOf: sshConfigUrl, encoding: .utf8) else {
+            return []
+        }
+
+        var hosts: [String] = []
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.lowercased().hasPrefix("host ") {
+                let parts = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                for p in parts.dropFirst() {
+                    let h = p.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if h != "*" && !hosts.contains(h) {
+                        hosts.append(h)
+                    }
+                }
+            }
+        }
+        return hosts
+    }
+
+    nonisolated static func executeRemoteSshFix(target: String, proxyPort: Int) async -> (success: Bool, message: String) {
+        let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTarget.isEmpty else {
+            return (false, "SSH 目标不能为空")
+        }
+
+        let remoteScript = """
+PORT=\(proxyPort)
+PROXY_URL="http://127.0.0.1:${PORT}"
+SOCKS_URL="socks5://127.0.0.1:${PORT}"
+
+BASHRC="$HOME/.bashrc"
+if [ -f "$BASHRC" ]; then
+    grep -v -E "http_proxy|https_proxy|all_proxy|no_proxy|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|Antigravity.*Proxy" "$BASHRC" > "${BASHRC}.notun_tmp" 2>/dev/null || cat "$BASHRC" > "${BASHRC}.notun_tmp"
+    cat << 'EOF' > "$BASHRC"
+# === Antigravity & AI Proxy Config (MUST BE AT TOP) ===
+export HTTP_PROXY="http://127.0.0.1:\(proxyPort)"
+export HTTPS_PROXY="http://127.0.0.1:\(proxyPort)"
+export ALL_PROXY="socks5://127.0.0.1:\(proxyPort)"
+export http_proxy="http://127.0.0.1:\(proxyPort)"
+export https_proxy="http://127.0.0.1:\(proxyPort)"
+export all_proxy="socks5://127.0.0.1:\(proxyPort)"
+export NO_PROXY="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,*.local"
+export no_proxy="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,*.local"
+# ====================================================
+
+EOF
+    cat "${BASHRC}.notun_tmp" >> "$BASHRC"
+    rm -f "${BASHRC}.notun_tmp"
+    echo "[✔] ~/.bashrc 顶部代理已成功注入"
+fi
+
+for sub in User Machine; do
+    DIR="$HOME/.antigravity-ide-server/data/${sub}"
+    mkdir -p "$DIR" 2>/dev/null
+    FILE="${DIR}/settings.json"
+    if [ ! -f "$FILE" ]; then echo "{}" > "$FILE"; fi
+    python3 -c "
+import json
+p = '${FILE}'
+try:
+    with open(p, 'r') as f: d = json.load(f)
+except: d = {}
+d['http.proxy'] = '${PROXY_URL}'
+d['http.proxySupport'] = 'override'
+d['http.proxyStrictSSL'] = False
+with open(p, 'w') as f: json.dump(d, f, indent=2)
+" 2>/dev/null || true
+    echo "[✔] 远程 IDE 设置已更新: ${FILE}"
+done
+
+killall -9 language_server_linux_x64 antigravity-ide-server node 2>/dev/null || true
+echo "[✔] 远程旧版语言服务与服务器进程已重置"
+echo "🎉 远程服务器修复完成！"
+"""
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+                process.arguments = [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=8",
+                    "-o", "StrictHostKeyChecking=accept-new",
+                    trimmedTarget,
+                    "bash -s"
+                ]
+
+                let inPipe = Pipe()
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+
+                process.standardInput = inPipe
+                process.standardOutput = outPipe
+                process.standardError = errPipe
+
+                do {
+                    try process.run()
+                    if let data = remoteScript.data(using: .utf8) {
+                        inPipe.fileHandleForWriting.write(data)
+                        try? inPipe.fileHandleForWriting.close()
+                    }
+                    process.waitUntilExit()
+
+                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    let stdoutStr = String(data: outData, encoding: .utf8) ?? ""
+                    let stderrStr = String(data: errData, encoding: .utf8) ?? ""
+
+                    if process.terminationStatus == 0 {
+                        let msg = stdoutStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                        continuation.resume(returning: (true, msg.isEmpty ? "远程服务器配置成功！" : msg))
+                    } else {
+                        let combinedErr = (stderrStr.isEmpty ? stdoutStr : stderrStr).trimmingCharacters(in: .whitespacesAndNewlines)
+                        continuation.resume(returning: (false, combinedErr.isEmpty ? "SSH 执行失败 (退出码 \(process.terminationStatus))" : combinedErr))
+                    }
+                } catch {
+                    continuation.resume(returning: (false, "无法调用 ssh: \(error.localizedDescription)"))
+                }
+            }
+        }
     }
 
     // MARK: - Smart Whitelist Normalization
@@ -386,6 +637,7 @@ final class AntigravityManager: ObservableObject {
     ) {
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
+        Self.syncLocalIdeProxySettings(useProxy: useProxy, port: targetPort)
 
         if isRunning, let app = findAntigravityApps().first {
             if #available(macOS 14.0, *) {
@@ -408,6 +660,7 @@ final class AntigravityManager: ObservableObject {
         statusMessage = "正在关闭旧进程..."
         Self.syncSystemProxyBypassDomains(rawText: rawWhitelistText)
         let targetPort = isAutoPortEnabled ? self.activePort : proxyPort
+        Self.syncLocalIdeProxySettings(useProxy: useProxy, port: targetPort)
 
         Task {
             let runningApps = self.findAntigravityApps()
