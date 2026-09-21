@@ -42,15 +42,15 @@ struct ControlCenterView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6"
     }
 
-    // 动态页面宽度：根据实际内容与操作复杂度自适应尺寸，呈现开阔呼吸感
+    // 动态页面宽度：克制适度扩展（370~375），主要依靠纵向舒展，避免因触碰屏幕右边缘导致窗口翻转
     private var targetPageWidth: CGFloat {
         switch currentPage {
         case .main, .portSettings:
             return 315
         case .whitelist:
-            return 415
+            return 370
         case .speedTest, .auditLog:
-            return 450
+            return 375
         }
     }
 
@@ -150,7 +150,7 @@ struct ControlCenterView: View {
                 }
             }
         }
-        .frame(width: targetPageWidth)
+        .frame(width: targetPageWidth, alignment: .topLeading)
         .background(
             ZStack {
                 Rectangle()
