@@ -42,6 +42,18 @@ struct ControlCenterView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6"
     }
 
+    // 动态页面宽度：根据实际内容与操作复杂度自适应尺寸，呈现开阔呼吸感
+    private var targetPageWidth: CGFloat {
+        switch currentPage {
+        case .main, .portSettings:
+            return 315
+        case .whitelist:
+            return 415
+        case .speedTest, .auditLog:
+            return 450
+        }
+    }
+
     var body: some View {
         ZStack {
             switch currentPage {
@@ -138,7 +150,7 @@ struct ControlCenterView: View {
                 }
             }
         }
-        .frame(width: 310)
+        .frame(width: targetPageWidth)
         .background(
             ZStack {
                 Rectangle()

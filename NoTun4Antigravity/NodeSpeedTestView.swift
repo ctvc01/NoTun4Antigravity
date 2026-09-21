@@ -501,16 +501,16 @@ struct NodeSpeedTestView: View {
                                     }
                                 } label: {
                                     Image(systemName: copiedNodeName == node.name ? "checkmark" : "doc.on.doc")
-                                        .font(.system(size: 9))
+                                        .font(.system(size: 10))
                                         .foregroundColor(copiedNodeName == node.name ? .green : .secondary)
                                 }
                                 .buttonStyle(.plain)
                                 .help("复制节点全名")
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
                             .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .fill(Color(NSColor.controlBackgroundColor).opacity(0.45))
                             )
                         }
@@ -518,10 +518,9 @@ struct NodeSpeedTestView: View {
                 }
                 .padding(.trailing, 2)
             }
-            .frame(height: 170)
+            .frame(height: 270)
         }
         .padding(14)
-        .frame(width: 310)
         .onAppear {
             subscriptionUrl = savedSubscriptionUrl
             // 优先读取本地持久化缓存，避免每次打开重新拉取

@@ -145,7 +145,6 @@ struct ProxyPortView: View {
                 .keyboardShortcut(.defaultAction)
             }
             .padding(14)
-            .frame(width: 310)
 
             // MARK: - Toast Overlay
             if showToast {

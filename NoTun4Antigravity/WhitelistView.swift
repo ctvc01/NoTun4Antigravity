@@ -61,11 +61,11 @@ struct WhitelistView: View {
                 .padding(.horizontal, 2)
 
                 // MARK: - Rules Editor
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 7) {
                     TextEditor(text: $editorContent)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .frame(height: 135)
-                        .padding(6)
+                        .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                        .frame(height: 230)
+                        .padding(8)
                         .background(Color(NSColor.textBackgroundColor).opacity(0.45))
                         .cornerRadius(8)
                         .overlay(
@@ -74,15 +74,15 @@ struct WhitelistView: View {
                         )
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("支持每行一条: *.internal, 10.0.0.0/8, 公司内网等")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary.opacity(0.8))
+                        Text("支持每行一条: *.ctripcorp.com, 10.0.0.0/8, 公司内部网段等")
+                            .font(.system(size: 9.5))
+                            .foregroundColor(.secondary.opacity(0.85))
                         HStack(spacing: 3) {
                             Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 8))
-                                .foregroundColor(.blue)
-                            Text("保存自动与 macOS 系统网络代理白名单做并集合并")
                                 .font(.system(size: 8.5))
+                                .foregroundColor(.blue)
+                            Text("保存自动与 macOS 系统网络代理白名单做并集合并，防客户端冲掉")
+                                .font(.system(size: 9))
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -100,7 +100,7 @@ struct WhitelistView: View {
                             .font(.system(size: 12, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 8)
                     .foregroundColor(.white)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -116,7 +116,6 @@ struct WhitelistView: View {
                 .keyboardShortcut(.defaultAction)
             }
             .padding(14)
-            .frame(width: 310)
 
             // MARK: - Toast Feedback
             if showToast {

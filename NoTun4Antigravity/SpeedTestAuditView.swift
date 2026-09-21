@@ -145,7 +145,7 @@ struct SpeedTestAuditView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                    .frame(height: 140)
+                    .frame(height: 230)
                 }
             }
 
@@ -161,7 +161,7 @@ struct SpeedTestAuditView: View {
                             .font(.system(size: 10, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 6)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
                     .cornerRadius(6)
                 }
@@ -177,7 +177,7 @@ struct SpeedTestAuditView: View {
                             .font(.system(size: 10, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 6)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
                     .cornerRadius(6)
                 }
@@ -198,7 +198,6 @@ struct SpeedTestAuditView: View {
             }
         }
         .padding(14)
-        .frame(width: 310)
         .sheet(isPresented: $showRawLogSheet) {
             rawLogSheetView
         }
@@ -209,18 +208,17 @@ struct SpeedTestAuditView: View {
     private func metricCard(title: String, value: String, color: Color, subtext: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 8, weight: .medium))
+                .font(.system(size: 9.5))
                 .foregroundColor(.secondary)
-                .lineLimit(1)
             Text(value)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundColor(color)
             Text(subtext)
-                .font(.system(size: 7.5))
+                .font(.system(size: 8))
                 .foregroundColor(.secondary.opacity(0.8))
                 .lineLimit(1)
         }
-        .padding(6)
+        .padding(7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
         .cornerRadius(8)
@@ -231,30 +229,30 @@ struct SpeedTestAuditView: View {
     }
 
     private func comparisonRow(_ item: AuditComparisonItem) -> some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: 8) {
             // 时间
             Text(formatTime(item.timestamp))
                 .font(.system(size: 9, weight: .regular, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(width: 44, alignment: .leading)
 
-            // 比对数据
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
+            // 比对数据横向铺开（呼吸感）
+            HStack(spacing: 12) {
+                HStack(spacing: 3) {
                     Text("预估:")
-                        .font(.system(size: 8.5))
+                        .font(.system(size: 9))
                         .foregroundColor(.secondary)
                     Text(item.probeStatus)
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.primary)
                 }
 
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Text("实际:")
-                        .font(.system(size: 8.5))
+                        .font(.system(size: 9))
                         .foregroundColor(.secondary)
                     Text(item.actualStatus)
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(item.verdictType == .falsePositive ? .red : .primary)
                 }
             }
@@ -264,7 +262,7 @@ struct SpeedTestAuditView: View {
             // 结论徽章
             verdictBadge(item.verdictType)
         }
-        .padding(5)
+        .padding(6)
         .background(Color(NSColor.textBackgroundColor).opacity(0.3))
         .cornerRadius(6)
     }
