@@ -73,10 +73,20 @@ struct WhitelistView: View {
                                 .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
                         )
 
-                    Text("支持每行一条: *.internal, 10.0.0.0/8, 公司内网等")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary.opacity(0.8))
-                        .padding(.leading, 2)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("支持每行一条: *.internal, 10.0.0.0/8, 公司内网等")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary.opacity(0.8))
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.blue)
+                            Text("保存自动与 macOS 系统网络代理白名单做并集合并")
+                                .font(.system(size: 8.5))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.leading, 2)
                 }
 
                 // MARK: - Save Action
@@ -145,11 +155,14 @@ struct WhitelistView: View {
     private func submitRules() {
         whitelistRules = editorContent
 
+        // ponytail: 保存时无论 Antigravity 是否运行，均立即将白名单合并同步至 macOS 系统网络代理，防第三方代理软件冲掉
+        AntigravityManager.syncSystemProxyBypassDomains(rawText: editorContent)
+
         if manager.isRunning {
             manager.restart(useProxy: useProxy, proxyPort: proxyPort, rawWhitelistText: editorContent)
-            toastMessage = "白名单已应用，正在重启生效"
+            toastMessage = "已保存并与系统代理白名单合并"
         } else {
-            toastMessage = "白名单已保存，下次启动时生效"
+            toastMessage = "已保存并与系统代理白名单合并"
         }
 
         withAnimation {

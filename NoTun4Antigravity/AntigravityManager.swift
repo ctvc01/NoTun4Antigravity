@@ -6,6 +6,7 @@
 import Foundation
 import AppKit
 import Combine
+import CFNetwork
 
 // MARK: - Node Health Status
 struct NodeHealthStatus: Equatable {
@@ -44,7 +45,34 @@ final class AntigravityManager: ObservableObject {
 
     // MARK: - Nonisolated Defaults (Swift 6 Safe)
     nonisolated static let defaultProxyPort: Int = 20890
-    nonisolated static let defaultWhitelistLines: String = ""
+    nonisolated static let defaultWhitelistLines: String = """
+localhost
+127.0.0.1
+*.local
+ctripcorp.com
+*.ctripcorp.com
+ctrip.com
+*.ctrip.com
+ctripsmartdns.com
+*.ctripsmartdns.com
+c-ctrip.com
+*.c-ctrip.com
+tripcdn.com
+*.tripcdn.com
+trip.com
+*.trip.com
+larkenterprise.com
+*.larkenterprise.com
+feishu.cn
+*.feishu.cn
+*.feishucdn.com
+*.bytegoofy.com
+*.volccdn.com
+*.pstatp.com
+10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
+"""
 
     private var pollTimer: Timer?
     private var healthCheckTimer: Timer?
@@ -55,6 +83,8 @@ final class AntigravityManager: ObservableObject {
         startMonitoring()
         refreshStatus()
         probeCurrentNodeHealth()
+        let savedRules = UserDefaults.standard.string(forKey: "whitelistRules") ?? Self.defaultWhitelistLines
+        Self.syncSystemProxyBypassDomains(rawText: savedRules)
     }
 
     deinit {
@@ -103,6 +133,7 @@ final class AntigravityManager: ObservableObject {
 
         checkProcessStatus()
         checkProxyPort(port: self.activePort)
+        Self.checkAndSelfHealSystemProxyBypass()
     }
 
     // MARK: - Process Inspection
@@ -230,6 +261,10 @@ final class AntigravityManager: ObservableObject {
     // MARK: - Dual Real-World Health Check (Google + Antigravity AI)
 
     func probeCurrentNodeHealth() {
+        // 轻量自愈：检查系统代理白名单是否被第三方客户端冲掉，若未包含则自动并集合并
+        let savedRules = UserDefaults.standard.string(forKey: "whitelistRules") ?? Self.defaultWhitelistLines
+        Self.syncSystemProxyBypassDomains(rawText: savedRules)
+
         guard !nodeHealth.isChecking else { return }
         nodeHealth.isChecking = true
         let port = self.activePort
@@ -439,9 +474,19 @@ Host *
         var noProxySet = Set<String>(["localhost", "127.0.0.1", "::1", "*.local", ".local"])
         var chromiumSet = Set<String>(["localhost", "127.0.0.1", "<local>", "*.local"])
 
+        var hasCtrip = false
+        var hasLark = false
+
         for item in rawItems {
             let trimmed = item.lowercased()
             if trimmed.isEmpty { continue }
+
+            if trimmed.contains("ctripcorp.com") || trimmed.contains("ctrip.com") {
+                hasCtrip = true
+            }
+            if trimmed.contains("larkenterprise.com") || trimmed.contains("feishu") {
+                hasLark = true
+            }
 
             if trimmed.contains("/") || trimmed.allSatisfy({ "0123456789.:".contains($0) }) {
                 noProxySet.insert(trimmed)
@@ -469,30 +514,243 @@ Host *
             chromiumSet.insert(".*\(domain)")
         }
 
+        // 智能关联：携程内网 SLB 与前端公共资源（c-ctrip / tripcdn）依赖别名与公网直连，自动联动加白
+        if hasCtrip {
+            for d in [
+                "ctripsmartdns.com",
+                "ctripcorp.com",
+                "ctrip.com",
+                "c-ctrip.com",
+                "tripcdn.com",
+                "trip.com"
+            ] {
+                noProxySet.insert(d)
+                noProxySet.insert(".\(d)")
+                noProxySet.insert("*.\(d)")
+                chromiumSet.insert(d)
+                chromiumSet.insert("*.\(d)")
+                chromiumSet.insert(".*\(d)")
+            }
+        }
+
+        // 智能关联：飞书/Lark 企业版静态资源与协作 API 域名，避免被外部代理误调度至境外导致卡顿
+        if hasLark {
+            for d in [
+                "larkenterprise.com",
+                "feishu.cn",
+                "feishucdn.com",
+                "bytegoofy.com",
+                "pstatp.com",
+                "volccdn.com"
+            ] {
+                noProxySet.insert(d)
+                noProxySet.insert(".\(d)")
+                noProxySet.insert("*.\(d)")
+                chromiumSet.insert(d)
+                chromiumSet.insert("*.\(d)")
+                chromiumSet.insert(".*\(d)")
+            }
+        }
+
         let noProxyEnv = noProxySet.sorted().joined(separator: ",")
         let chromiumBypass = chromiumSet.sorted().joined(separator: ";")
         return (noProxyEnv, chromiumBypass)
     }
 
-    // MARK: - System Proxy Bypass Sync
+    // MARK: - System Proxy Bypass Sync (macOS native bypassdomains union)
+
+    nonisolated static func getActiveNetworkServices() -> [String] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+        task.arguments = ["-listallnetworkservices"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        try? task.run()
+        task.waitUntilExit()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else {
+            return ["Wi-Fi", "USB 10/100/1000 LAN", "AX88179A", "Ethernet", "Thunderbolt Bridge"]
+        }
+
+        let lines = output.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { line in
+                !line.isEmpty &&
+                !line.hasPrefix("An asterisk") &&
+                !line.hasPrefix("*")
+            }
+
+        return lines.isEmpty ? ["Wi-Fi", "USB 10/100/1000 LAN", "AX88179A", "Ethernet", "Thunderbolt Bridge"] : lines
+    }
+
+    nonisolated static func getExistingBypassDomains(for service: String) -> Set<String> {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+        task.arguments = ["-getproxybypassdomains", service]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        try? task.run()
+        task.waitUntilExit()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return [] }
+
+        var result = Set<String>()
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.contains("There aren't any bypass domains") {
+                continue
+            }
+            result.insert(trimmed)
+        }
+        return result
+    }
+
+    nonisolated static func macOsBypassDomains(from rawText: String) -> Set<String> {
+        let rawItems = rawText
+            .components(separatedBy: CharacterSet.newlines.union(CharacterSet(charactersIn: ",")))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var result = Set<String>(["localhost", "127.*", "*.local"])
+        var hasCtrip = false
+        var hasLark = false
+
+        for item in rawItems {
+            let trimmed = item.lowercased()
+            if trimmed.isEmpty { continue }
+
+            if trimmed.contains("ctripcorp.com") || trimmed.contains("ctrip.com") {
+                hasCtrip = true
+            }
+            if trimmed.contains("larkenterprise.com") || trimmed.contains("feishu") {
+                hasLark = true
+            }
+
+            // 将 CIDR 格式自动转换为 macOS networksetup 支持的通配符
+            if trimmed.contains("/") {
+                if trimmed.hasPrefix("10.") {
+                    result.insert("10.*")
+                } else if trimmed.hasPrefix("192.168.") {
+                    result.insert("192.168.*")
+                } else if trimmed.hasPrefix("172.16.") || trimmed.contains("172.16.0.0/12") {
+                    result.insert("172.16.*")
+                    result.insert("172.17.*")
+                    result.insert("172.18.*")
+                    result.insert("172.19.*")
+                    result.insert("172.2*")
+                    result.insert("172.30.*")
+                    result.insert("172.31.*")
+                } else {
+                    let parts = trimmed.split(separator: "/")
+                    if let ipPart = parts.first {
+                        let octets = ipPart.split(separator: ".")
+                        if octets.count >= 2 {
+                            result.insert("\(octets[0]).\(octets[1]).*")
+                        }
+                    }
+                }
+                continue
+            }
+
+            if trimmed == "127.0.0.1" || trimmed.hasPrefix("127.") {
+                result.insert("127.*")
+                continue
+            }
+
+            if trimmed == "localhost" || trimmed == "*.local" {
+                result.insert(trimmed)
+                continue
+            }
+
+            var domain = trimmed
+            if domain.hasPrefix("*.") {
+                domain = String(domain.dropFirst(2))
+            } else if domain.hasPrefix(".") {
+                domain = String(domain.dropFirst(1))
+            } else if domain.hasPrefix("*") {
+                domain = String(domain.dropFirst(1))
+            }
+
+            guard !domain.isEmpty else { continue }
+            result.insert(domain)
+            result.insert("*.\(domain)")
+        }
+
+        if hasCtrip {
+            for d in [
+                "ctripcorp.com",
+                "ctrip.com",
+                "ctripsmartdns.com",
+                "c-ctrip.com",
+                "tripcdn.com",
+                "trip.com"
+            ] {
+                result.insert(d)
+                result.insert("*.\(d)")
+            }
+        }
+
+        if hasLark {
+            for d in [
+                "larkenterprise.com",
+                "feishu.cn",
+                "feishucdn.com",
+                "bytegoofy.com",
+                "pstatp.com",
+                "volccdn.com"
+            ] {
+                result.insert(d)
+                result.insert("*.\(d)")
+            }
+        }
+
+        return result
+    }
 
     nonisolated static func syncSystemProxyBypassDomains(rawText: String) {
-        let (noProxyEnv, _) = normalizeWhitelist(rawText: rawText)
-        let domains = noProxyEnv.components(separatedBy: ",").filter { !$0.isEmpty }
-        guard !domains.isEmpty else { return }
-
-        let commonServices = ["Wi-Fi", "USB 10/100/1000 LAN", "AX88179A", "Ethernet", "Thunderbolt Bridge"]
+        let requiredDomains = macOsBypassDomains(from: rawText)
+        guard !requiredDomains.isEmpty else { return }
 
         DispatchQueue.global(qos: .utility).async {
-            for service in commonServices {
+            let services = getActiveNetworkServices()
+            for service in services {
+                let existing = getExistingBypassDomains(for: service)
+                // ponytail: 若系统已有规则中已完整包含了所需规则，跳过写入，避免频繁唤醒系统设置
+                if requiredDomains.isSubset(of: existing) {
+                    continue
+                }
+
+                // 与系统现有规则做并集（Union），保护 FlClash / 本机其他合法规则不被抹去
+                let merged = existing.union(requiredDomains)
+                let sortedList = merged.sorted()
+
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
                 var args = ["-setproxybypassdomains", service]
-                args.append(contentsOf: domains)
+                args.append(contentsOf: sortedList)
                 task.arguments = args
                 try? task.run()
                 task.waitUntilExit()
             }
+        }
+    }
+
+    // MARK: - Zero-Overhead In-Memory Proxy Guard (0.05ms check)
+
+    nonisolated static func checkAndSelfHealSystemProxyBypass() {
+        guard let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any],
+              let exceptions = dict[kCFNetworkProxiesExceptionsList as String] as? [String] else {
+            return
+        }
+        let exceptionSet = Set(exceptions)
+        // 关键核心内网域名检测：若核心携程域名消失，说明被第三方客户端（如 FlClash 开关系统代理）全量冲掉了
+        let keyDomains = ["*.ctripcorp.com", "ctripcorp.com", "*.ctrip.com"]
+        let isMissing = keyDomains.contains { !exceptionSet.contains($0) }
+        if isMissing {
+            let savedRules = UserDefaults.standard.string(forKey: "whitelistRules") ?? Self.defaultWhitelistLines
+            Self.syncSystemProxyBypassDomains(rawText: savedRules)
         }
     }
 

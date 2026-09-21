@@ -36,9 +36,9 @@ struct ControlCenterView: View {
             .count
     }
 
-    // 动态读取版本号，默认 1.4
+    // 动态读取版本号，默认 1.5
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.4"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5"
     }
 
     var body: some View {
