@@ -7,8 +7,8 @@ import SwiftUI
 import AppKit
 import Darwin
 
-struct TestedNodeItem: Identifiable, Equatable {
-    let id = UUID()
+struct TestedNodeItem: Identifiable, Equatable, Codable {
+    var id: UUID = UUID()
     let name: String
     var host: String = ""
     var port: Int = 0
@@ -29,7 +29,11 @@ struct NodeSpeedTestView: View {
     @ObservedObject var auditLogger = SpeedTestAuditLogger.shared
 
     @AppStorage("savedSubscriptionUrl") private var savedSubscriptionUrl: String = ""
+    @AppStorage("lastSubscriptionUpdateTime") private var lastSubscriptionUpdateTime: Double = 0
+
     @State private var subscriptionUrl: String = ""
+    @State private var isEditingSubscriptionUrl: Bool = false
+    @State private var editUrlDraft: String = ""
     @State private var isLoadingSubscription: Bool = false
     @State private var onlyShowGeminiRecommended: Bool = false
     @State private var sortBySpeed: Bool = true
@@ -37,6 +41,35 @@ struct NodeSpeedTestView: View {
     @State private var parsedNodes: [TestedNodeItem] = []
     @State private var copiedNodeName: String? = nil
     @State private var fetchErrorMessage: String? = nil
+
+    private static let cacheKey = "cachedSubscriptionNodes"
+
+    private var lastUpdateText: String {
+        guard lastSubscriptionUpdateTime > 0 else { return "未同步" }
+        let date = Date(timeIntervalSince1970: lastSubscriptionUpdateTime)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return "更新于 " + formatter.string(from: date)
+    }
+
+    private func saveCachedNodes(_ nodes: [TestedNodeItem]) {
+        let clean = nodes.map { item -> TestedNodeItem in
+            var copy = item
+            copy.isTesting = false
+            return copy
+        }
+        if let data = try? JSONEncoder().encode(clean) {
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+        }
+    }
+
+    private func loadCachedNodes() -> [TestedNodeItem]? {
+        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+              let list = try? JSONDecoder().decode([TestedNodeItem].self, from: data) else {
+            return nil
+        }
+        return list
+    }
 
     private var filteredNodes: [TestedNodeItem] {
         var list = parsedNodes
@@ -237,57 +270,142 @@ struct NodeSpeedTestView: View {
                     )
             )
 
-            // MARK: - 2. 订阅解析与测速操作栏
+            // MARK: - 2. 订阅与测速操作栏 (紧凑折叠 / 展开编辑)
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    TextField("粘贴订阅链接...", text: $subscriptionUrl)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 10))
-
-                    Button {
-                        loadSubscription()
-                    } label: {
-                        HStack(spacing: 2) {
-                            if isLoadingSubscription {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.down.circle.fill")
-                            }
-                            Text(isLoadingSubscription ? "..." : "解析")
-                        }
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.blue)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isLoadingSubscription || subscriptionUrl.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                    if !parsedNodes.isEmpty {
-                        Button {
-                            testAllNodesSpeed()
-                        } label: {
-                            HStack(spacing: 2) {
-                                if isSpeedTestingAll {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "bolt.fill")
+                if isEditingSubscriptionUrl {
+                    // 编辑状态：输入框 + 保存/取消
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text("配置订阅链接")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Button {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                    isEditingSubscriptionUrl = false
                                 }
-                                Text(isSpeedTestingAll ? "..." : "测速")
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
                             }
+                            .buttonStyle(.plain)
+                        }
+
+                        HStack(spacing: 6) {
+                            TextField("粘贴订阅链接 (HTTP/HTTPS)...", text: $editUrlDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+
+                            Button("保存并刷新") {
+                                let trimmed = editUrlDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                subscriptionUrl = trimmed
+                                savedSubscriptionUrl = trimmed
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                    isEditingSubscriptionUrl = false
+                                }
+                                loadSubscription()
+                            }
+                            .buttonStyle(.plain)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.blue))
+                            .disabled(editUrlDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                    )
+                } else {
+                    // 常态：折叠显示订阅信息 + 刷新按钮 + 测速按钮
+                    HStack(spacing: 6) {
+                        // 订阅状态与编辑按钮
+                        HStack(spacing: 4) {
+                            Image(systemName: "link.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.blue)
+
+                            if savedSubscriptionUrl.isEmpty {
+                                Text("未配置订阅")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text(lastUpdateText)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Button {
+                                editUrlDraft = savedSubscriptionUrl
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                    isEditingSubscriptionUrl = true
+                                }
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.blue)
+                                    .padding(3)
+                                    .background(Color.blue.opacity(0.12))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(savedSubscriptionUrl.isEmpty ? "添加订阅链接" : "修改订阅链接")
+                        }
+
+                        Spacer()
+
+                        // 手动刷新订阅按钮
+                        Button {
+                            loadSubscription()
+                        } label: {
+                            HStack(spacing: 2) {
+                                if isLoadingSubscription {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                Text("刷新订阅")
+                            }
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
                             .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.orange)
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(isSpeedTestingAll)
+                        .disabled(isLoadingSubscription || savedSubscriptionUrl.isEmpty)
+
+                        // 测速按钮
+                        if !parsedNodes.isEmpty {
+                            Button {
+                                testAllNodesSpeed()
+                            } label: {
+                                HStack(spacing: 2) {
+                                    if isSpeedTestingAll {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Image(systemName: "bolt.fill")
+                                    }
+                                    Text(isSpeedTestingAll ? "..." : "测速")
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.orange)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSpeedTestingAll)
+                        }
                     }
                 }
 
@@ -405,8 +523,12 @@ struct NodeSpeedTestView: View {
         .padding(14)
         .frame(width: 310)
         .onAppear {
-            if !savedSubscriptionUrl.isEmpty {
-                subscriptionUrl = savedSubscriptionUrl
+            subscriptionUrl = savedSubscriptionUrl
+            // 优先读取本地持久化缓存，避免每次打开重新拉取
+            if let cached = loadCachedNodes(), !cached.isEmpty {
+                self.parsedNodes = cached
+            } else if !savedSubscriptionUrl.isEmpty {
+                // 仅在首次本地无缓存且配置了订阅链接时自动拉取
                 loadSubscription()
             }
         }
@@ -441,6 +563,8 @@ struct NodeSpeedTestView: View {
                         self.fetchErrorMessage = "已成功拉取，但未解析出有效节点，请确认链接类型"
                     } else {
                         self.parsedNodes = nodes
+                        self.lastSubscriptionUpdateTime = Date().timeIntervalSince1970
+                        self.saveCachedNodes(nodes)
                         // 自动触发一次测速
                         self.testAllNodesSpeed()
                     }
@@ -453,6 +577,8 @@ struct NodeSpeedTestView: View {
                     await MainActor.run {
                         self.isLoadingSubscription = false
                         self.parsedNodes = nodes
+                        self.lastSubscriptionUpdateTime = Date().timeIntervalSince1970
+                        self.saveCachedNodes(nodes)
                         self.testAllNodesSpeed()
                     }
                 } catch let retryErr {
@@ -510,6 +636,7 @@ struct NodeSpeedTestView: View {
 
             await MainActor.run {
                 self.isSpeedTestingAll = false
+                self.saveCachedNodes(self.parsedNodes)
             }
         }
     }
