@@ -169,7 +169,8 @@ struct WhitelistView: View {
             showToast = true
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
             withAnimation {
                 showToast = false
             }

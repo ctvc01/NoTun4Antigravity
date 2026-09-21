@@ -10,6 +10,7 @@ enum ControlCenterPage: Hashable {
     case portSettings
     case speedTest
     case whitelist
+    case auditLog
 }
 
 struct ControlCenterView: View {
@@ -36,9 +37,9 @@ struct ControlCenterView: View {
             .count
     }
 
-    // 动态读取版本号，默认 1.5
+    // 动态读取版本号，默认 1.6
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6"
     }
 
     var body: some View {
@@ -65,11 +66,18 @@ struct ControlCenterView: View {
                     )
                 )
             case .speedTest:
-                NodeSpeedTestView(onBack: {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                        currentPage = .main
+                NodeSpeedTestView(
+                    onBack: {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                            currentPage = .main
+                        }
+                    },
+                    onNavigateAudit: {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                            currentPage = .auditLog
+                        }
                     }
-                })
+                )
                 .transition(
                     .asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -80,6 +88,18 @@ struct ControlCenterView: View {
                 WhitelistView(onBack: {
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                         currentPage = .main
+                    }
+                })
+                .transition(
+                    .asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    )
+                )
+            case .auditLog:
+                SpeedTestAuditView(onBack: {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        currentPage = .speedTest
                     }
                 })
                 .transition(

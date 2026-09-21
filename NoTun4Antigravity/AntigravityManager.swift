@@ -76,6 +76,7 @@ feishu.cn
 
     private var pollTimer: Timer?
     private var healthCheckTimer: Timer?
+    private var auditSampleTimer: Timer?
     private var workspaceCancellables = Set<AnyCancellable>()
     private var monitoredPort: Int = defaultProxyPort
 
@@ -90,6 +91,7 @@ feishu.cn
     deinit {
         pollTimer?.invalidate()
         healthCheckTimer?.invalidate()
+        auditSampleTimer?.invalidate()
     }
 
     // MARK: - Monitoring
@@ -118,6 +120,13 @@ feishu.cn
         }
         RunLoop.main.add(healthTimer, forMode: .common)
         self.healthCheckTimer = healthTimer
+
+        // 每 20 秒采样一次 Antigravity 实际通信健康度，用于与测速结果持续对齐
+        let auditTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { [weak self] _ in
+            self?.sampleActualAntigravityConnection()
+        }
+        RunLoop.main.add(auditTimer, forMode: .common)
+        self.auditSampleTimer = auditTimer
     }
 
     func refreshStatus(port: Int? = nil) {
@@ -375,6 +384,17 @@ feishu.cn
             errMsg = "CloudCode 调度流受限"
         }
 
+        // 记录探活测速日志用于交叉质检与对齐
+        SpeedTestAuditLogger.shared.recordProbe(
+            port: port,
+            target: "Google Gemini AI & CloudCode",
+            tcpPingMs: nil,
+            tlsHandshakeMs: nil,
+            ttfbMs: antigravitySpeed ?? googleSpeed,
+            isSuccess: antigravityReady || (googleSpeed != nil),
+            errorDetail: errMsg
+        )
+
         return NodeHealthStatus(
             isChecking: false,
             googleLatencyMs: googleSpeed,
@@ -385,6 +405,58 @@ feishu.cn
             errorMessage: errMsg,
             lastChecked: Date()
         )
+    }
+
+    // MARK: - Actual Antigravity Traffic Sampling for Audit Calibration
+
+    func sampleActualAntigravityConnection() {
+        guard isProxyPortReady else { return }
+        let port = self.activePort
+
+        Task.detached(priority: .utility) {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 6.0
+            config.timeoutIntervalForResource = 7.0
+            config.connectionProxyDictionary = [
+                kCFNetworkProxiesHTTPEnable as String: 1,
+                kCFNetworkProxiesHTTPProxy as String: "127.0.0.1",
+                kCFNetworkProxiesHTTPPort as String: port,
+                kCFNetworkProxiesHTTPSEnable as String: 1,
+                kCFNetworkProxiesHTTPSProxy as String: "127.0.0.1",
+                kCFNetworkProxiesHTTPSPort as String: port
+            ]
+            let session = URLSession(configuration: config)
+            let endpoint = "https://generativelanguage.googleapis.com"
+            guard let url = URL(string: endpoint) else { return }
+
+            let startTime = CFAbsoluteTimeGetCurrent()
+            do {
+                let (_, response) = try await session.data(from: url)
+                let elapsed = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+                if let http = response as? HTTPURLResponse {
+                    let isOk = (http.statusCode >= 200 && http.statusCode < 500)
+                    let err = isOk ? nil : "HTTP \(http.statusCode) 网关阻断"
+                    SpeedTestAuditLogger.shared.recordActualConnection(
+                        port: port,
+                        endpoint: "generativelanguage.googleapis.com",
+                        latencyMs: elapsed,
+                        isSuccess: isOk,
+                        httpStatus: http.statusCode,
+                        errorDetail: err
+                    )
+                }
+            } catch {
+                let elapsed = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+                SpeedTestAuditLogger.shared.recordActualConnection(
+                    port: port,
+                    endpoint: "generativelanguage.googleapis.com",
+                    latencyMs: elapsed > 7000 ? nil : elapsed,
+                    isSuccess: false,
+                    httpStatus: nil,
+                    errorDetail: error.localizedDescription
+                )
+            }
+        }
     }
 
     // MARK: - Local IDE settings.json Anti-Conflict Synchronization

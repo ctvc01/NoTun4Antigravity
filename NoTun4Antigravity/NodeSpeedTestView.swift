@@ -23,8 +23,10 @@ struct TestedNodeItem: Identifiable, Equatable {
 
 struct NodeSpeedTestView: View {
     var onBack: () -> Void
+    var onNavigateAudit: (() -> Void)? = nil
 
     @ObservedObject var manager = AntigravityManager.shared
+    @ObservedObject var auditLogger = SpeedTestAuditLogger.shared
 
     @AppStorage("savedSubscriptionUrl") private var savedSubscriptionUrl: String = ""
     @State private var subscriptionUrl: String = ""
@@ -85,6 +87,22 @@ struct NodeSpeedTestView: View {
                 }
 
                 Spacer()
+
+                if let onNavigateAudit = onNavigateAudit {
+                    Button(action: onNavigateAudit) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "chart.xyaxis.line")
+                            Text("质检日志")
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     manager.probeCurrentNodeHealth()
@@ -172,6 +190,41 @@ struct NodeSpeedTestView: View {
                         .font(.system(size: 9))
                         .foregroundColor(.orange)
                         .lineLimit(1)
+                }
+
+                // 测速校准与真实通信质量指标
+                if auditLogger.report.alignedComparisonCount > 0 {
+                    HStack(spacing: 5) {
+                        Text("质检校准:")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+
+                        Text("吻合率 \(String(format: "%.0f", auditLogger.report.consistencyRatePercent))%")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(auditLogger.report.consistencyRatePercent >= 80 ? .green : .orange)
+
+                        Text("• 评分 \(auditLogger.report.calibratedReliabilityScore)")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(auditLogger.report.calibratedReliabilityScore >= 70 ? .green : .red)
+
+                        if auditLogger.report.falsePositiveCount > 0 {
+                            Text("⚠️ 拦截虚高 \(auditLogger.report.falsePositiveCount)次")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.red)
+                        }
+
+                        Spacer()
+
+                        if let onNavigateAudit = onNavigateAudit {
+                            Button(action: onNavigateAudit) {
+                                Text("详情 ›")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.blue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
             .padding(8)
