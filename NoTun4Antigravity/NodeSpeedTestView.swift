@@ -64,19 +64,19 @@ struct TestedNodeItem: Identifiable, Equatable, Codable {
         self.isTesting = false
         self.hasTested = (try? container.decode(Bool.self, forKey: .hasTested)) ?? (latencyMs != nil)
 
-        // 核心纠偏机制：对旧缓存中的节点用最新规则强制重新评估，纠正历史误判（如台湾07等直连家宽节点）
+        // 提取专线、AI-Prime、原生等优质能力标识作为列表辅助参考
         let meta = Self.resolveMetadata(name: self.name)
         self.isGeminiDedicated = meta.isGemini
         self.isResidential = meta.isHome
         self.isNative = meta.isNat
         self.isAIPrime = meta.isAIPrime
-        self.isUnsupportedType = meta.isUnsupported
+        self.isUnsupportedType = false
     }
 
-    static func resolveMetadata(name: String) -> (isGemini: Bool, isHome: Bool, isNat: Bool, isAIPrime: Bool, isUnsupported: Bool) {
+    static func resolveMetadata(name: String) -> (isGemini: Bool, isHome: Bool, isNat: Bool, isAIPrime: Bool) {
         let lower = name.lowercased()
 
-        // 1. 明确具备支持 Antigravity / Gemini 原生直连能力的优质标识
+        // 识别支持 Antigravity / Gemini 原生直连的优质能力特征（仅作为视觉标识，不作为一刀切过滤依据）
         let isGemini = lower.contains("gemini")
         let isDedicatedLine = name.contains("专线") || name.contains("專線") || lower.contains("iplc") || lower.contains("iepl")
         let isExplicitAI = isGemini || lower.contains("ai-prime") || lower.contains("ai_prime") || lower.contains("claude") || lower.contains("gpt")
@@ -84,20 +84,7 @@ struct TestedNodeItem: Identifiable, Equatable, Codable {
         let isNat = name.contains("原生") || lower.contains("native")
         let isHome = name.contains("家寬") || name.contains("家宽") || lower.contains("home") || lower.contains("residential")
 
-        // 2. 不支持或易受 Google AI 阻断/非生产用途节点（黑名单语义特征）
-        // 包含：特殊、游戏、限速、下载、回国、直连家宽（未经专线中继容易遭遇 Gemini 403 区域阻断）等
-        let unsupportedKeywords = [
-            "特殊", "游戏", "game", "下载", "download", "限速", "limit",
-            "回国", "剩余", "到期", "官网", "重置", "过期", "测试", "test", "维护", "inf",
-            "直連", "直连", "家寬", "家宽"
-        ]
-        let hasUnsupportedKeyword = unsupportedKeywords.contains { keyword in
-            lower.contains(keyword) || name.contains(keyword)
-        }
-        // 如果包含受限特征且缺乏专线/原生/Gemini保证，则判定为不可用类型
-        let isUnsupported = hasUnsupportedKeyword && !isAIPrime && !isNat
-
-        return (isGemini, isHome, isNat, isAIPrime, isUnsupported)
+        return (isGemini, isHome, isNat, isAIPrime)
     }
 }
 
@@ -152,25 +139,24 @@ struct NodeSpeedTestView: View {
 
     private var filteredNodes: [TestedNodeItem] {
         var list = parsedNodes.filter { node in
-            // 1. 当前正在使用的活动节点始终保留在列表中置顶展示（即便断连或AI受限也展示，以便用户明确感知当前状态并切换）
+            // 1. 当前正在使用的活动节点始终保留在列表中置顶展示（即便断连或AI受限也展示，以便用户明确感知当前状态并排查切换）
             if let active = manager.activeNodeName, node.name == active {
                 return true
             }
-            // 2. 默认且强制过滤掉不具备支持 Antigravity 连接能力的类型（如特殊用途、游戏、下载、限速等非生产型节点）
-            if node.isUnsupportedType {
-                return false
-            }
-            // 3. 针对已测速节点进行连通性与高丢包假通质量过滤
+            // 2. 以最新真实测速检测结果为准（动态过滤与解除过滤）：
             if node.hasTested {
-                // 过滤掉断连、超时节点
+                // 真实测速断连、超时的节点，自动过滤隐藏
                 guard let ms = node.latencyMs, ms > 0 else {
                     return false
                 }
-                // 过滤掉超高延迟假通节点（> 2000ms 的节点在 HTTP/2 多路复用和 TLS 握手阶段丢包率极高，审计日志中极易出现 310 隧道超时）
+                // 真实测速超高延迟（> 2000ms 高丢包假通），自动过滤隐藏
                 if ms > 2000 {
                     return false
                 }
+                // 最新测速中恢复可连通且延迟合格的节点，自动解除过滤重新展示！
+                return true
             }
+            // 尚未测速的节点保留在列表中等待全量审查测速
             return true
         }
 
@@ -525,7 +511,7 @@ struct NodeSpeedTestView: View {
                         Image(systemName: "checkmark.shield.fill")
                             .font(.system(size: 9))
                             .foregroundColor(.green)
-                        Text("全自动质检: 过滤断连、超时、>2s假通与非AI类型")
+                        Text("动态实测质检: 过滤断连、超时与>2s假通节点")
                             .font(.system(size: 9))
                             .foregroundColor(.secondary)
                     }
@@ -536,7 +522,7 @@ struct NodeSpeedTestView: View {
                         let readyCount = filteredNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
                         let filteredOutCount = max(0, parsedNodes.count - filteredNodes.count)
                         if filteredOutCount > 0 {
-                            Text("\(filteredNodes.count) 可用 (已净滤 \(filteredOutCount) 劣质/失效)")
+                            Text("\(filteredNodes.count) 连通 (已滤 \(filteredOutCount) 不可用)")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.secondary)
                         } else {
@@ -769,7 +755,11 @@ struct NodeSpeedTestView: View {
         guard !parsedNodes.isEmpty, !isSpeedTestingAll else { return }
         isSpeedTestingAll = true
 
+        // 每次手动测速时，同步刷新当前活动节点的端到端 AI 真机体检
+        manager.probeCurrentNodeHealth()
+
         Task {
+            // 对底层所有订阅节点全部重新审查并置为正在测速状态
             for i in parsedNodes.indices {
                 parsedNodes[i].isTesting = true
             }
@@ -1008,7 +998,7 @@ struct NodeSpeedTestView: View {
             isResidential: meta.isHome,
             isNative: meta.isNat,
             isAIPrime: meta.isAIPrime,
-            isUnsupportedType: meta.isUnsupported
+            isUnsupportedType: false
         )
     }
 }
