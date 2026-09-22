@@ -19,6 +19,86 @@ struct TestedNodeItem: Identifiable, Equatable, Codable {
     var isResidential: Bool = false
     var isNative: Bool = false
     var isAIPrime: Bool = false
+    var isUnsupportedType: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, host, port, latencyMs, isTesting, hasTested
+        case isGeminiDedicated, isResidential, isNative, isAIPrime, isUnsupportedType
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        host: String = "",
+        port: Int = 0,
+        latencyMs: Int? = nil,
+        isTesting: Bool = false,
+        hasTested: Bool = false,
+        isGeminiDedicated: Bool = false,
+        isResidential: Bool = false,
+        isNative: Bool = false,
+        isAIPrime: Bool = false,
+        isUnsupportedType: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.host = host
+        self.port = port
+        self.latencyMs = latencyMs
+        self.isTesting = isTesting
+        self.hasTested = hasTested
+        self.isGeminiDedicated = isGeminiDedicated
+        self.isResidential = isResidential
+        self.isNative = isNative
+        self.isAIPrime = isAIPrime
+        self.isUnsupportedType = isUnsupportedType
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
+        self.name = try container.decode(String.self, forKey: .name)
+        self.host = (try? container.decode(String.self, forKey: .host)) ?? ""
+        self.port = (try? container.decode(Int.self, forKey: .port)) ?? 0
+        self.latencyMs = try? container.decode(Int.self, forKey: .latencyMs)
+        self.isTesting = false
+        self.hasTested = (try? container.decode(Bool.self, forKey: .hasTested)) ?? (latencyMs != nil)
+
+        // 核心纠偏机制：对旧缓存中的节点用最新规则强制重新评估，纠正历史误判（如台湾07等直连家宽节点）
+        let meta = Self.resolveMetadata(name: self.name)
+        self.isGeminiDedicated = meta.isGemini
+        self.isResidential = meta.isHome
+        self.isNative = meta.isNat
+        self.isAIPrime = meta.isAIPrime
+        self.isUnsupportedType = meta.isUnsupported
+    }
+
+    static func resolveMetadata(name: String) -> (isGemini: Bool, isHome: Bool, isNat: Bool, isAIPrime: Bool, isUnsupported: Bool) {
+        let lower = name.lowercased()
+
+        // 1. 明确具备支持 Antigravity / Gemini 原生直连能力的优质标识
+        let isGemini = lower.contains("gemini")
+        let isDedicatedLine = name.contains("专线") || name.contains("專線") || lower.contains("iplc") || lower.contains("iepl")
+        let isExplicitAI = isGemini || lower.contains("ai-prime") || lower.contains("ai_prime") || lower.contains("claude") || lower.contains("gpt")
+        let isAIPrime = isExplicitAI || isDedicatedLine
+        let isNat = name.contains("原生") || lower.contains("native")
+        let isHome = name.contains("家寬") || name.contains("家宽") || lower.contains("home") || lower.contains("residential")
+
+        // 2. 不支持或易受 Google AI 阻断/非生产用途节点（黑名单语义特征）
+        // 包含：特殊、游戏、限速、下载、回国、直连家宽（未经专线中继容易遭遇 Gemini 403 区域阻断）等
+        let unsupportedKeywords = [
+            "特殊", "游戏", "game", "下载", "download", "限速", "limit",
+            "回国", "剩余", "到期", "官网", "重置", "过期", "测试", "test", "维护", "inf",
+            "直連", "直连", "家寬", "家宽"
+        ]
+        let hasUnsupportedKeyword = unsupportedKeywords.contains { keyword in
+            lower.contains(keyword) || name.contains(keyword)
+        }
+        // 如果包含受限特征且缺乏专线/原生/Gemini保证，则判定为不可用类型
+        let isUnsupported = hasUnsupportedKeyword && !isAIPrime && !isNat
+
+        return (isGemini, isHome, isNat, isAIPrime, isUnsupported)
+    }
 }
 
 struct NodeSpeedTestView: View {
@@ -30,13 +110,11 @@ struct NodeSpeedTestView: View {
 
     @AppStorage("savedSubscriptionUrl") private var savedSubscriptionUrl: String = ""
     @AppStorage("lastSubscriptionUpdateTime") private var lastSubscriptionUpdateTime: Double = 0
-    @AppStorage("hideUnavailableNodes") private var hideUnavailableNodes: Bool = true
 
     @State private var subscriptionUrl: String = ""
     @State private var isEditingSubscriptionUrl: Bool = false
     @State private var editUrlDraft: String = ""
     @State private var isLoadingSubscription: Bool = false
-    @State private var onlyShowGeminiRecommended: Bool = false
     @State private var sortBySpeed: Bool = true
     @State private var isSpeedTestingAll: Bool = false
     @State private var parsedNodes: [TestedNodeItem] = []
@@ -73,22 +151,29 @@ struct NodeSpeedTestView: View {
     }
 
     private var filteredNodes: [TestedNodeItem] {
-        var list = parsedNodes
-        if onlyShowGeminiRecommended {
-            list = list.filter { $0.isGeminiDedicated || $0.isAIPrime || $0.isResidential }
-        }
-        if hideUnavailableNodes {
-            list = list.filter { node in
-                // 当前正在使用的活动节点，无论是否断连均保留在列表中便于观察排查
-                if let active = manager.activeNodeName, node.name == active {
-                    return true
-                }
-                if node.hasTested {
-                    return (node.latencyMs ?? -1) > 0
-                }
+        var list = parsedNodes.filter { node in
+            // 1. 当前正在使用的活动节点始终保留在列表中置顶展示（即便断连或AI受限也展示，以便用户明确感知当前状态并切换）
+            if let active = manager.activeNodeName, node.name == active {
                 return true
             }
+            // 2. 默认且强制过滤掉不具备支持 Antigravity 连接能力的类型（如特殊用途、游戏、下载、限速等非生产型节点）
+            if node.isUnsupportedType {
+                return false
+            }
+            // 3. 针对已测速节点进行连通性与高丢包假通质量过滤
+            if node.hasTested {
+                // 过滤掉断连、超时节点
+                guard let ms = node.latencyMs, ms > 0 else {
+                    return false
+                }
+                // 过滤掉超高延迟假通节点（> 2000ms 的节点在 HTTP/2 多路复用和 TLS 握手阶段丢包率极高，审计日志中极易出现 310 隧道超时）
+                if ms > 2000 {
+                    return false
+                }
+            }
+            return true
         }
+
         if sortBySpeed {
             list.sort { a, b in
                 // 当前正在使用的活动节点置顶展示
@@ -434,34 +519,28 @@ struct NodeSpeedTestView: View {
                         .lineLimit(1)
                 }
 
-                // 筛选栏
-                HStack(spacing: 8) {
-                    Toggle(isOn: $onlyShowGeminiRecommended) {
-                        Text("仅专线")
-                            .font(.system(size: 9, weight: .medium))
+                // 智能状态与可用节点统计栏 (默认工业级过滤)
+                HStack(spacing: 6) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.green)
+                        Text("全自动质检: 过滤断连、超时、>2s假通与非AI类型")
+                            .font(.system(size: 9))
                             .foregroundColor(.secondary)
                     }
-                    .toggleStyle(.checkbox)
-
-                    Toggle(isOn: $hideUnavailableNodes) {
-                        Text("过滤失效")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    .toggleStyle(.checkbox)
-                    .help("自动隐藏测速超时或无法连接的失效节点")
 
                     Spacer()
 
                     if !parsedNodes.isEmpty {
-                        let readyCount = parsedNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
-                        let failedCount = parsedNodes.filter { $0.hasTested && ($0.latencyMs == nil || $0.latencyMs! <= 0) }.count
-                        if failedCount > 0 && hideUnavailableNodes {
-                            Text("\(filteredNodes.count) 可用 (已滤 \(failedCount) 失效)")
+                        let readyCount = filteredNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
+                        let filteredOutCount = max(0, parsedNodes.count - filteredNodes.count)
+                        if filteredOutCount > 0 {
+                            Text("\(filteredNodes.count) 可用 (已净滤 \(filteredOutCount) 劣质/失效)")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.secondary)
                         } else {
-                            Text("\(parsedNodes.count) 节点 | 已测 \(readyCount)")
+                            Text("\(filteredNodes.count) 节点 | 已测 \(readyCount)")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.secondary)
                         }
@@ -517,7 +596,16 @@ struct NodeSpeedTestView: View {
                                     // 当前活动节点的延迟直接展示真实端到端体检耗时！
                                     if manager.nodeHealth.isChecking {
                                         ProgressView().controlSize(.mini)
-                                    } else if let realMs = manager.nodeHealth.antigravityLatencyMs ?? manager.nodeHealth.googleLatencyMs {
+                                    } else if !manager.nodeHealth.isAntigravityReady {
+                                        // 核心安全防线：若 AI 服务受限，即便 Google 网页通畅也坚决标红警示，严禁虚报正常
+                                        Text("AI受限")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(Capsule().fill(Color.red.opacity(0.2)))
+                                            .foregroundColor(.red)
+                                            .help(manager.nodeHealth.errorMessage ?? "当前节点无法正常连接 Google Gemini / Antigravity 服务")
+                                    } else if let realMs = manager.nodeHealth.antigravityLatencyMs {
                                         let isFast = realMs < 250
                                         let isMed = realMs < 500
                                         Text("\(realMs)ms")
@@ -539,7 +627,7 @@ struct NodeSpeedTestView: View {
                                             .padding(.vertical, 1.5)
                                             .background(Capsule().fill(Color.red.opacity(0.2)))
                                             .foregroundColor(.red)
-                                    } else if let ms = node.latencyMs {
+                                    } else if let ms = node.latencyMs, ms <= 2000 {
                                         Text("\(ms)ms")
                                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                             .padding(.horizontal, 5)
@@ -547,9 +635,9 @@ struct NodeSpeedTestView: View {
                                             .background(Capsule().fill(Color.blue.opacity(0.18)))
                                             .foregroundColor(.blue)
                                     } else {
-                                        Text("未体检")
+                                        Text("不可用")
                                             .font(.system(size: 8, weight: .medium))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(.red)
                                     }
                                 } else if node.isTesting {
                                     ProgressView().controlSize(.mini)
@@ -725,7 +813,7 @@ struct NodeSpeedTestView: View {
         }
     }
 
-    nonisolated static func measureSocketLatency(host: String, port: Int, timeoutMs: Int32 = 1800) async -> Int? {
+    nonisolated static func measureSocketLatency(host: String, port: Int, timeoutMs: Int32 = 1500) async -> Int? {
         guard !host.isEmpty, port > 0, port <= 65535 else { return nil }
 
         return await withCheckedContinuation { continuation in
@@ -911,20 +999,16 @@ struct NodeSpeedTestView: View {
     }
 
     private func createNodeItem(name: String, host: String = "", port: Int = 0) -> TestedNodeItem {
-        let lower = name.lowercased()
-        let isGemini = lower.contains("gemini")
-        let isAIPrime = lower.contains("ai-prime") || lower.contains("ai_prime") || lower.contains("ai")
-        let isHome = name.contains("家寬") || name.contains("家宽") || lower.contains("home") || lower.contains("residential")
-        let isNat = name.contains("原生") || lower.contains("native")
-
+        let meta = TestedNodeItem.resolveMetadata(name: name)
         return TestedNodeItem(
             name: name,
             host: host,
             port: port,
-            isGeminiDedicated: isGemini,
-            isResidential: isHome,
-            isNative: isNat,
-            isAIPrime: isAIPrime
+            isGeminiDedicated: meta.isGemini,
+            isResidential: meta.isHome,
+            isNative: meta.isNat,
+            isAIPrime: meta.isAIPrime,
+            isUnsupportedType: meta.isUnsupported
         )
     }
 }
