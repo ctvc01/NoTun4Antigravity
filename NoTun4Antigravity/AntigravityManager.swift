@@ -7,6 +7,7 @@ import Foundation
 import AppKit
 import Combine
 import CFNetwork
+import SQLite3
 
 // MARK: - Node Health Status
 struct NodeHealthStatus: Equatable {
@@ -42,6 +43,7 @@ final class AntigravityManager: ObservableObject {
     @Published var activePort: Int = defaultProxyPort
     @Published var isAutoPortEnabled: Bool = true
     @Published var nodeHealth = NodeHealthStatus()
+    @Published var activeNodeName: String? = nil
 
     // MARK: - Nonisolated Defaults (Swift 6 Safe)
     nonisolated static let defaultProxyPort: Int = 20890
@@ -140,6 +142,7 @@ feishu.cn
             }
         }
 
+        self.activeNodeName = Self.resolveFlClashActiveNode()
         checkProcessStatus()
         checkProxyPort(port: self.activePort)
         Self.checkAndSelfHealSystemProxyBypass()
@@ -276,6 +279,7 @@ feishu.cn
 
         guard !nodeHealth.isChecking else { return }
         nodeHealth.isChecking = true
+        self.activeNodeName = Self.resolveFlClashActiveNode()
         let port = self.activePort
 
         Task.detached(priority: .userInitiated) {
@@ -299,6 +303,7 @@ feishu.cn
             kCFNetworkProxiesHTTPSPort as String: port
         ]
         let session = URLSession(configuration: config)
+        var lastCapturedError: Error? = nil
 
         // 1. 实测 Antigravity Gemini AI 服务端到端实际速度 (通道1: generativelanguage.googleapis.com)
         var antigravitySpeed: Int? = nil
@@ -316,6 +321,7 @@ feishu.cn
                 }
             } catch {
                 antigravityReady = false
+                lastCapturedError = error
             }
         }
 
@@ -331,6 +337,7 @@ feishu.cn
                 }
             } catch {
                 cloudCodeReady = false
+                if lastCapturedError == nil { lastCapturedError = error }
             }
         }
 
@@ -346,6 +353,7 @@ feishu.cn
                 }
             } catch {
                 oauthReady = false
+                if lastCapturedError == nil { lastCapturedError = error }
             }
         }
 
@@ -366,6 +374,7 @@ feishu.cn
                         break
                     }
                 } catch {
+                    if lastCapturedError == nil { lastCapturedError = error }
                     continue
                 }
             }
@@ -377,7 +386,11 @@ feishu.cn
 
         var errMsg: String? = nil
         if googleSpeed == nil && !antigravityReady {
-            errMsg = "无法连接 Google 与 AI 节点"
+            if let err = lastCapturedError {
+                errMsg = "无法连接 Google 与 AI (\(diagnoseNetworkError(err)))"
+            } else {
+                errMsg = "无法连接 Google 与 AI 节点"
+            }
         } else if !oauthReady && antigravityReady {
             errMsg = "OAuth2 握手异常或被拦截 (Agent 任务易中断)"
         } else if !cloudCodeReady && antigravityReady {
@@ -405,6 +418,63 @@ feishu.cn
             errorMessage: errMsg,
             lastChecked: Date()
         )
+    }
+
+    nonisolated static func diagnoseNetworkError(_ error: Error) -> String {
+        let desc = error.localizedDescription
+        let nsErr = error as NSError
+        if desc.contains("310") || (nsErr.domain == kCFErrorDomainCFNetwork as String && nsErr.code == 310) {
+            return "HTTPS 代理隧道超时 (远端节点拥堵/海缆丢包)"
+        }
+        if desc.contains("TLS") || desc.contains("SSL") || nsErr.code == -1200 || desc.contains("-9816") {
+            return "TLS 握手校验失败 (节点证书异常/协议断连)"
+        }
+        if nsErr.code == NSURLErrorTimedOut || desc.contains("timed out") {
+            return "响应硬超时 (>7s)"
+        }
+        if nsErr.code == NSURLErrorCannotConnectToHost || desc.contains("Could not connect") {
+            return "本地代理端口未启动或断开"
+        }
+        return desc
+    }
+
+    nonisolated static func resolveFlClashActiveNode() -> String? {
+        let dbPath = ("~/Library/Application Support/com.follow.clash/database.sqlite" as NSString).expandingTildeInPath
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        var stmt: OpaquePointer?
+        let query = "SELECT selected_map FROM profiles ORDER BY last_update_date DESC LIMIT 1"
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW, let text = sqlite3_column_text(stmt, 0) else {
+            return nil
+        }
+
+        let jsonString = String(cString: text)
+        guard let data = jsonString.data(using: .utf8),
+              let map = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return nil
+        }
+
+        var current = map["📹 Google"] ?? map["Google"] ?? map["🚀 选择节点"] ?? map["GLOBAL"]
+        var visited = Set<String>()
+
+        while let candidate = current, !visited.contains(candidate) {
+            visited.insert(candidate)
+            if let next = map[candidate] {
+                current = next
+            } else {
+                return candidate
+            }
+        }
+        return current
     }
 
     // MARK: - Actual Antigravity Traffic Sampling for Audit Calibration

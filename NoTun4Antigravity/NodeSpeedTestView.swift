@@ -30,6 +30,7 @@ struct NodeSpeedTestView: View {
 
     @AppStorage("savedSubscriptionUrl") private var savedSubscriptionUrl: String = ""
     @AppStorage("lastSubscriptionUpdateTime") private var lastSubscriptionUpdateTime: Double = 0
+    @AppStorage("hideUnavailableNodes") private var hideUnavailableNodes: Bool = true
 
     @State private var subscriptionUrl: String = ""
     @State private var isEditingSubscriptionUrl: Bool = false
@@ -76,8 +77,25 @@ struct NodeSpeedTestView: View {
         if onlyShowGeminiRecommended {
             list = list.filter { $0.isGeminiDedicated || $0.isAIPrime || $0.isResidential }
         }
+        if hideUnavailableNodes {
+            list = list.filter { node in
+                // 当前正在使用的活动节点，无论是否断连均保留在列表中便于观察排查
+                if let active = manager.activeNodeName, node.name == active {
+                    return true
+                }
+                if node.hasTested {
+                    return (node.latencyMs ?? -1) > 0
+                }
+                return true
+            }
+        }
         if sortBySpeed {
             list.sort { a, b in
+                // 当前正在使用的活动节点置顶展示
+                if let active = manager.activeNodeName {
+                    if a.name == active { return true }
+                    if b.name == active { return false }
+                }
                 switch (a.latencyMs, b.latencyMs) {
                 case let (ms1?, ms2?):
                     return ms1 < ms2
@@ -425,13 +443,28 @@ struct NodeSpeedTestView: View {
                     }
                     .toggleStyle(.checkbox)
 
+                    Toggle(isOn: $hideUnavailableNodes) {
+                        Text("过滤失效")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("自动隐藏测速超时或无法连接的失效节点")
+
                     Spacer()
 
                     if !parsedNodes.isEmpty {
                         let readyCount = parsedNodes.filter { ($0.latencyMs ?? -1) > 0 }.count
-                        Text("\(parsedNodes.count) 节点 | 已测 \(readyCount)")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.secondary)
+                        let failedCount = parsedNodes.filter { $0.hasTested && ($0.latencyMs == nil || $0.latencyMs! <= 0) }.count
+                        if failedCount > 0 && hideUnavailableNodes {
+                            Text("\(filteredNodes.count) 可用 (已滤 \(failedCount) 失效)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("\(parsedNodes.count) 节点 | 已测 \(readyCount)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }
@@ -444,7 +477,7 @@ struct NodeSpeedTestView: View {
                             Image(systemName: "list.bullet.rectangle.portrait")
                                 .font(.system(size: 18))
                                 .foregroundColor(.secondary.opacity(0.4))
-                            Text(parsedNodes.isEmpty ? "输入上方订阅链接点击「解析」，即可在此实测节点速度" : "暂无符合筛选条件的节点")
+                            Text(parsedNodes.isEmpty ? "输入上方订阅链接点击「解析」，即可在此实测节点速度" : "暂无符合筛选条件的可用节点")
                                 .font(.system(size: 10))
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -453,9 +486,19 @@ struct NodeSpeedTestView: View {
                         .frame(maxWidth: .infinity, minHeight: 120)
                     } else {
                         ForEach(filteredNodes) { node in
+                            let isActiveNode = (manager.activeNodeName != nil && manager.activeNodeName == node.name)
                             HStack(spacing: 6) {
+                                if isActiveNode {
+                                    Text("使用中")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.blue))
+                                        .foregroundColor(.white)
+                                }
+
                                 Text(node.name)
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(.system(size: 10, weight: isActiveNode ? .bold : .medium))
                                     .lineLimit(1)
                                     .truncationMode(.tail)
 
@@ -470,7 +513,45 @@ struct NodeSpeedTestView: View {
                                         .foregroundColor(.purple)
                                 }
 
-                                if node.isTesting {
+                                if isActiveNode {
+                                    // 当前活动节点的延迟直接展示真实端到端体检耗时！
+                                    if manager.nodeHealth.isChecking {
+                                        ProgressView().controlSize(.mini)
+                                    } else if let realMs = manager.nodeHealth.antigravityLatencyMs ?? manager.nodeHealth.googleLatencyMs {
+                                        let isFast = realMs < 250
+                                        let isMed = realMs < 500
+                                        Text("\(realMs)ms")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(
+                                                Capsule().fill(
+                                                    isFast ? Color.green.opacity(0.2) :
+                                                    (isMed ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
+                                                )
+                                            )
+                                            .foregroundColor(isFast ? .green : (isMed ? .blue : .orange))
+                                    } else if let err = manager.nodeHealth.errorMessage {
+                                        let tag = err.contains("TLS") ? "TLS阻断" : (err.contains("超时") ? "超时" : "断连")
+                                        Text(tag)
+                                            .font(.system(size: 8, weight: .bold))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(Capsule().fill(Color.red.opacity(0.2)))
+                                            .foregroundColor(.red)
+                                    } else if let ms = node.latencyMs {
+                                        Text("\(ms)ms")
+                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(Capsule().fill(Color.blue.opacity(0.18)))
+                                            .foregroundColor(.blue)
+                                    } else {
+                                        Text("未体检")
+                                            .font(.system(size: 8, weight: .medium))
+                                            .foregroundColor(.secondary)
+                                    }
+                                } else if node.isTesting {
                                     ProgressView().controlSize(.mini)
                                 } else if let ms = node.latencyMs {
                                     let isFast = ms < 180
@@ -511,7 +592,11 @@ struct NodeSpeedTestView: View {
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.45))
+                                    .fill(isActiveNode ? Color.blue.opacity(0.12) : Color(NSColor.controlBackgroundColor).opacity(0.45))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(isActiveNode ? Color.blue.opacity(0.4) : Color.clear, lineWidth: 1)
                             )
                         }
                     }
