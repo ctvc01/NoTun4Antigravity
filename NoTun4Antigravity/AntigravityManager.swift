@@ -63,14 +63,6 @@ tripcdn.com
 *.tripcdn.com
 trip.com
 *.trip.com
-larkenterprise.com
-*.larkenterprise.com
-feishu.cn
-*.feishu.cn
-*.feishucdn.com
-*.bytegoofy.com
-*.volccdn.com
-*.pstatp.com
 10.0.0.0/8
 172.16.0.0/12
 192.168.0.0/16
@@ -196,6 +188,13 @@ feishu.cn
                 if self.isProxyPortReady != isOpen {
                     self.isProxyPortReady = isOpen
                 }
+            }
+
+            // 孤儿系统代理自愈守卫 (Proxy Hygiene Guard):
+            // 当代理端口已经关闭 (例如用户退出了 FlClash / 关停了代理服务)，但 macOS 系统的 HTTP/HTTPS/SOCKS 代理依然残留开启时：
+            // 立即自动关闭系统残留代理，让全系统应用（钉钉、微信、浏览器等）瞬间恢复直连上网，从根本上杜绝死端口导致的断网！
+            if !isOpen && Self.isSystemProxyTurnedOn() {
+                Self.disableAllSystemProxies()
             }
         }
     }
@@ -834,24 +833,48 @@ Host *
             }
         }
 
-        if hasLark {
-            for d in [
-                "larkenterprise.com",
-                "feishu.cn",
-                "feishucdn.com",
-                "bytegoofy.com",
-                "pstatp.com",
-                "volccdn.com"
-            ] {
-                result.insert(d)
-                result.insert("*.\(d)")
-            }
-        }
-
         return result
     }
 
+    // MARK: - System Proxy State Inspection & Orphan Proxy Hygiene
+
+    nonisolated static func isSystemProxyTurnedOn() -> Bool {
+        guard let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else {
+            return false
+        }
+        let httpEnable = (dict[kCFNetworkProxiesHTTPEnable as String] as? Int == 1)
+        let httpsEnable = (dict[kCFNetworkProxiesHTTPSEnable as String] as? Int == 1)
+        let socksEnable = (dict[kCFNetworkProxiesSOCKSEnable as String] as? Int == 1)
+        return httpEnable || httpsEnable || socksEnable
+    }
+
+    nonisolated static func disableAllSystemProxies() {
+        let services = getActiveNetworkServices()
+        for service in services {
+            let task1 = Process()
+            task1.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+            task1.arguments = ["-setwebproxystate", service, "off"]
+            try? task1.run()
+            task1.waitUntilExit()
+
+            let task2 = Process()
+            task2.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+            task2.arguments = ["-setsecurewebproxystate", service, "off"]
+            try? task2.run()
+            task2.waitUntilExit()
+
+            let task3 = Process()
+            task3.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+            task3.arguments = ["-setsocksfirewallproxystate", service, "off"]
+            try? task3.run()
+            task3.waitUntilExit()
+        }
+    }
+
     nonisolated static func syncSystemProxyBypassDomains(rawText: String) {
+        // 系统代理未开启时（直连模式），绝不干涉系统网络设置，保持系统原生干净
+        guard isSystemProxyTurnedOn() else { return }
+
         let requiredDomains = macOsBypassDomains(from: rawText)
         guard !requiredDomains.isEmpty else { return }
 
@@ -882,6 +905,9 @@ Host *
     // MARK: - Zero-Overhead In-Memory Proxy Guard (0.05ms check)
 
     nonisolated static func checkAndSelfHealSystemProxyBypass() {
+        // 系统代理关闭（直连模式）时，无需自愈 Bypass 规则
+        guard isSystemProxyTurnedOn() else { return }
+
         guard let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any],
               let exceptions = dict[kCFNetworkProxiesExceptionsList as String] as? [String] else {
             return

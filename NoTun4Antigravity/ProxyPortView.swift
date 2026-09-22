@@ -143,6 +143,25 @@ struct ProxyPortView: View {
                 }
                 .buttonStyle(SpringButtonStyle(scale: 0.98))
                 .keyboardShortcut(.defaultAction)
+
+                Button {
+                    AntigravityManager.disableAllSystemProxies()
+                    toastMessage = "已关闭系统残留代理，恢复直连"
+                    withAnimation { showToast = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation { showToast = false }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.slash")
+                        Text("关闭残留系统代理 (恢复全系统直连)")
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
             }
             .padding(14)
 

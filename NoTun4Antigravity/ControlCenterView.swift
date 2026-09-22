@@ -37,9 +37,9 @@ struct ControlCenterView: View {
             .count
     }
 
-    // 动态读取版本号，默认 1.6
+    // 动态读取版本号，默认 1.7
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7"
     }
 
     // 动态页面宽度：克制适度扩展（370~375），主要依靠纵向舒展，避免因触碰屏幕右边缘导致窗口翻转
