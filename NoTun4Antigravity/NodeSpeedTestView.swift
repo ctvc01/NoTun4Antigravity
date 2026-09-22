@@ -139,11 +139,18 @@ struct NodeSpeedTestView: View {
 
     private var filteredNodes: [TestedNodeItem] {
         var list = parsedNodes.filter { node in
+            let isActive = (manager.activeNodeName != nil && manager.activeNodeName == node.name)
             // 1. 当前正在使用的活动节点始终保留在列表中置顶展示（即便断连或AI受限也展示，以便用户明确感知当前状态并排查切换）
-            if let active = manager.activeNodeName, node.name == active {
+            if isActive {
                 return true
             }
-            // 2. 以最新真实测速检测结果为准（动态过滤与解除过滤）：
+
+            // 2. 核心端到端防护：凡是在历史或最新实测中被证实无法连接 Antigravity（如 TLS 阻断、AI 区域受限、OAuth 拦截）的节点，坚决过滤排除！
+            if let record = auditLogger.nodeHealthRecords[node.name], !record.isAntigravityReady {
+                return false
+            }
+
+            // 3. 以最新真实测速检测结果为准（动态过滤与解除过滤）：
             if node.hasTested {
                 // 真实测速断连、超时的节点，自动过滤隐藏
                 guard let ms = node.latencyMs, ms > 0 else {
@@ -584,7 +591,8 @@ struct NodeSpeedTestView: View {
                                         ProgressView().controlSize(.mini)
                                     } else if !manager.nodeHealth.isAntigravityReady {
                                         // 核心安全防线：若 AI 服务受限，即便 Google 网页通畅也坚决标红警示，严禁虚报正常
-                                        Text("AI受限")
+                                        let tag = manager.nodeHealth.errorMessage?.contains("TLS") == true ? "TLS阻断" : "AI受限"
+                                        Text(tag)
                                             .font(.system(size: 8, weight: .bold))
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1.5)
@@ -592,19 +600,24 @@ struct NodeSpeedTestView: View {
                                             .foregroundColor(.red)
                                             .help(manager.nodeHealth.errorMessage ?? "当前节点无法正常连接 Google Gemini / Antigravity 服务")
                                     } else if let realMs = manager.nodeHealth.antigravityLatencyMs {
-                                        let isFast = realMs < 250
-                                        let isMed = realMs < 500
-                                        Text("\(realMs)ms")
-                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1.5)
-                                            .background(
-                                                Capsule().fill(
-                                                    isFast ? Color.green.opacity(0.2) :
-                                                    (isMed ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
-                                                )
+                                        let isFast = realMs < 400
+                                        let isMed = realMs < 800
+                                        HStack(spacing: 2) {
+                                            Text("AI")
+                                                .font(.system(size: 7, weight: .bold))
+                                            Text("\(realMs)ms")
+                                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        }
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(
+                                            Capsule().fill(
+                                                isFast ? Color.green.opacity(0.2) :
+                                                (isMed ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
                                             )
-                                            .foregroundColor(isFast ? .green : (isMed ? .blue : .orange))
+                                        )
+                                        .foregroundColor(isFast ? .green : (isMed ? .blue : .orange))
+                                        .help("当前活动节点访问 Google Gemini API 端到端真实响应速度")
                                     } else if let err = manager.nodeHealth.errorMessage {
                                         let tag = err.contains("TLS") ? "TLS阻断" : (err.contains("超时") ? "超时" : "断连")
                                         Text(tag)
@@ -614,7 +627,7 @@ struct NodeSpeedTestView: View {
                                             .background(Capsule().fill(Color.red.opacity(0.2)))
                                             .foregroundColor(.red)
                                     } else if let ms = node.latencyMs, ms <= 2000 {
-                                        Text("\(ms)ms")
+                                        Text("接入 \(ms)ms")
                                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1.5)
@@ -627,22 +640,37 @@ struct NodeSpeedTestView: View {
                                     }
                                 } else if node.isTesting {
                                     ProgressView().controlSize(.mini)
+                                } else if let rec = auditLogger.nodeHealthRecords[node.name], rec.isAntigravityReady, let aiMs = rec.realAILatencyMs {
+                                    // 曾经进行过真实端到端体检且验证成功的节点：突出展示实测 AI 真实延迟！
+                                    HStack(spacing: 2) {
+                                        Text("实测AI")
+                                            .font(.system(size: 7, weight: .bold))
+                                        Text("\(aiMs)ms")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    }
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1.5)
+                                    .background(Capsule().fill(Color.green.opacity(0.18)))
+                                    .foregroundColor(.green)
+                                    .help("该节点经端到端真机实测，可正常连接 Google Gemini API")
                                 } else if let ms = node.latencyMs {
+                                    // 尚未进行端到端体检的普通节点：明确标明这是到入口的接入握手延迟，不作虚高误导！
                                     let isFast = ms < 180
                                     let isMedium = ms < 350
-                                    Text("\(ms)ms")
-                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    Text("接入 \(ms)ms")
+                                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1.5)
                                         .background(
                                             Capsule().fill(
-                                                isFast ? Color.green.opacity(0.18) :
-                                                (isMedium ? Color.blue.opacity(0.18) : Color.orange.opacity(0.18))
+                                                isFast ? Color.blue.opacity(0.15) :
+                                                (isMedium ? Color(NSColor.controlColor).opacity(0.2) : Color.orange.opacity(0.15))
                                             )
                                         )
-                                        .foregroundColor(isFast ? .green : (isMedium ? .blue : .orange))
+                                        .foregroundColor(isFast ? .primary : (isMedium ? .secondary : .orange))
+                                        .help("到节点入口服务器的 TCP 握手延迟 (非 Google 端到端)")
                                 } else if node.hasTested {
-                                    Text("超时")
+                                    Text("断连")
                                         .font(.system(size: 8, weight: .medium))
                                         .foregroundColor(.red)
                                 }

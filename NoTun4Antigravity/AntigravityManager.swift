@@ -285,6 +285,15 @@ trip.com
             let result = await Self.performDualProbe(port: port)
             await MainActor.run {
                 self.nodeHealth = result
+                if let name = self.activeNodeName {
+                    SpeedTestAuditLogger.shared.updateNodeHealth(
+                        nodeName: name,
+                        isAntigravityReady: result.isAntigravityReady,
+                        isOAuthReady: result.isOAuthReady,
+                        realAILatencyMs: result.antigravityLatencyMs,
+                        failureReason: result.errorMessage
+                    )
+                }
             }
         }
     }
@@ -481,6 +490,7 @@ trip.com
     func sampleActualAntigravityConnection() {
         guard isProxyPortReady else { return }
         let port = self.activePort
+        let activeName = self.activeNodeName
 
         Task.detached(priority: .utility) {
             let config = URLSessionConfiguration.ephemeral
@@ -524,6 +534,17 @@ trip.com
                     httpStatus: nil,
                     errorDetail: error.localizedDescription
                 )
+                if let name = activeName {
+                    let desc = error.localizedDescription
+                    let reason = desc.contains("TLS") ? "TLS 握手阻断" : (desc.contains("310") ? "代理隧道超时" : desc)
+                    SpeedTestAuditLogger.shared.updateNodeHealth(
+                        nodeName: name,
+                        isAntigravityReady: false,
+                        isOAuthReady: false,
+                        realAILatencyMs: nil,
+                        failureReason: reason
+                    )
+                }
             }
         }
     }

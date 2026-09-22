@@ -60,6 +60,17 @@ struct AuditCorrelationReport: Equatable {
     var recentComparisons: [AuditComparisonItem] = []
 }
 
+// MARK: - Node Real Health Records (端到端真实健康记忆)
+
+struct NodeRealHealthRecord: Codable, Equatable {
+    var nodeName: String
+    var isAntigravityReady: Bool
+    var isOAuthReady: Bool
+    var realAILatencyMs: Int?
+    var lastChecked: Date
+    var failureReason: String?
+}
+
 // MARK: - Audit Logger Engine
 
 final class SpeedTestAuditLogger: ObservableObject {
@@ -67,18 +78,83 @@ final class SpeedTestAuditLogger: ObservableObject {
 
     @Published private(set) var entries: [AuditLogEntry] = []
     @Published private(set) var report: AuditCorrelationReport = AuditCorrelationReport()
+    @Published private(set) var nodeHealthRecords: [String: NodeRealHealthRecord] = [:]
 
     private let maxEntries = 400
     private let logFileUrl: URL
+    private let healthRecordsFileUrl: URL
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("NoTun4Antigravity/logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.logFileUrl = dir.appendingPathComponent("speed_test_audit.jsonl")
+        self.healthRecordsFileUrl = dir.appendingPathComponent("node_health_records.json")
 
         loadFromDisk()
+        loadHealthRecordsFromDisk()
         recalculateReport()
+    }
+
+    // MARK: - Node Health Archive APIs
+
+    func updateNodeHealth(
+        nodeName: String,
+        isAntigravityReady: Bool,
+        isOAuthReady: Bool = true,
+        realAILatencyMs: Int?,
+        failureReason: String? = nil
+    ) {
+        guard !nodeName.isEmpty else { return }
+        let record = NodeRealHealthRecord(
+            nodeName: nodeName,
+            isAntigravityReady: isAntigravityReady,
+            isOAuthReady: isOAuthReady,
+            realAILatencyMs: realAILatencyMs,
+            lastChecked: Date(),
+            failureReason: failureReason
+        )
+        DispatchQueue.main.async {
+            self.nodeHealthRecords[nodeName] = record
+            self.saveHealthRecordsToDisk()
+        }
+    }
+
+    private func saveHealthRecordsToDisk() {
+        if let data = try? JSONEncoder().encode(nodeHealthRecords) {
+            try? data.write(to: healthRecordsFileUrl)
+        }
+    }
+
+    private func loadHealthRecordsFromDisk() {
+        if let data = try? Data(contentsOf: healthRecordsFileUrl),
+           let records = try? JSONDecoder().decode([String: NodeRealHealthRecord].self, from: data) {
+            self.nodeHealthRecords = records
+        }
+
+        // 初始化历史审计日志中确认爆发过真实不可用（非超时/非延迟）的节点
+        // 1. 德国A节点：审计日志中 11:45 连续爆发 357 次 A TLS error caused the secure connection to fail
+        if nodeHealthRecords["🇩🇪 特殊｜德國-A [1.5][gRPC]"] == nil {
+            nodeHealthRecords["🇩🇪 特殊｜德國-A [1.5][gRPC]"] = NodeRealHealthRecord(
+                nodeName: "🇩🇪 特殊｜德國-A [1.5][gRPC]",
+                isAntigravityReady: false,
+                isOAuthReady: false,
+                realAILatencyMs: nil,
+                lastChecked: Date(),
+                failureReason: "TLS 握手阻断"
+            )
+        }
+        // 2. 台湾07节点：普通网页通但落地机被 Google Gemini 严格封控（返回受限）
+        if nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] == nil {
+            nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] = NodeRealHealthRecord(
+                nodeName: "🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]",
+                isAntigravityReady: false,
+                isOAuthReady: false,
+                realAILatencyMs: nil,
+                lastChecked: Date(),
+                failureReason: "AI 区域受限"
+            )
+        }
     }
 
     // MARK: - Logging APIs
