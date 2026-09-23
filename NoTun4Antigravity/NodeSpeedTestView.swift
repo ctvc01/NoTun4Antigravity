@@ -150,7 +150,13 @@ struct NodeSpeedTestView: View {
                 return false
             }
 
-            // 3. 以最新真实测速检测结果为准（动态过滤与解除过滤）：
+            // 3. 架构特征过滤：排除「特殊｜」系列实验节点（加拿大A、德国A、美国A等在日志中已证实 100% 存在 gRPC/TLS/310 隧道不兼容）
+            let isSpecialFamily = node.name.contains("特殊｜") || node.name.contains("特殊|") || (node.name.contains("特殊") && !node.isGeminiDedicated && !node.isAIPrime)
+            if isSpecialFamily {
+                return false
+            }
+
+            // 4. 以最新真实测速检测结果为准（动态过滤与解除过滤）：
             if node.hasTested {
                 // 真实测速断连、超时的节点，自动过滤隐藏
                 guard let ms = node.latencyMs, ms > 0 else {
@@ -518,7 +524,7 @@ struct NodeSpeedTestView: View {
                         Image(systemName: "checkmark.shield.fill")
                             .font(.system(size: 9))
                             .foregroundColor(.green)
-                        Text("动态实测质检: 过滤断连、超时与>2s假通节点")
+                        Text("动态实测质检: 过滤断连、超时、>2s假通与特殊/不可用节点")
                             .font(.system(size: 9))
                             .foregroundColor(.secondary)
                     }

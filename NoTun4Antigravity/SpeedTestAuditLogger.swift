@@ -144,7 +144,29 @@ final class SpeedTestAuditLogger: ObservableObject {
                 failureReason: "TLS 握手阻断"
             )
         }
-        // 2. 台湾07节点：普通网页通但落地机被 Google Gemini 严格封控（返回受限）
+        // 2. 加拿大A节点：实测连续爆发 kCFErrorDomainCFNetwork error 310 代理隧道超时/重置
+        if nodeHealthRecords["🇨🇦 特殊｜加拿大-A [1.0][gRPC]"] == nil {
+            nodeHealthRecords["🇨🇦 特殊｜加拿大-A [1.0][gRPC]"] = NodeRealHealthRecord(
+                nodeName: "🇨🇦 特殊｜加拿大-A [1.0][gRPC]",
+                isAntigravityReady: false,
+                isOAuthReady: false,
+                realAILatencyMs: nil,
+                lastChecked: Date(),
+                failureReason: "代理隧道超时 (CFNetwork 310)"
+            )
+        }
+        // 3. 美国A特殊节点：实测 TLS 握手校验失败 / 协议断连
+        if nodeHealthRecords["🇺🇸 特殊｜美國-A [5.0][gRPC][家寬]"] == nil {
+            nodeHealthRecords["🇺🇸 特殊｜美國-A [5.0][gRPC][家寬]"] = NodeRealHealthRecord(
+                nodeName: "🇺🇸 特殊｜美國-A [5.0][gRPC][家寬]",
+                isAntigravityReady: false,
+                isOAuthReady: false,
+                realAILatencyMs: nil,
+                lastChecked: Date(),
+                failureReason: "TLS 握手校验失败"
+            )
+        }
+        // 4. 台湾07节点：普通网页通但落地机被 Google Gemini 严格封控（返回受限）
         if nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] == nil {
             nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] = NodeRealHealthRecord(
                 nodeName: "🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]",
