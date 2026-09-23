@@ -29,6 +29,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable {
     var category: AuditLogCategory
     var target: String
     var port: Int
+    var activeNode: String? = nil
     var latencyMs: Int?
     var tcpPingMs: Int?
     var tlsHandshakeMs: Int?
@@ -42,6 +43,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable {
 struct AuditComparisonItem: Identifiable, Equatable {
     var id: UUID = UUID()
     var timestamp: Date
+    var nodeName: String?
     var probeEstimatedLatency: Int?
     var probeStatus: String
     var actualLatency: Int?
@@ -182,6 +184,7 @@ final class SpeedTestAuditLogger: ObservableObject {
     // MARK: - Logging APIs
 
     func recordProbe(
+        nodeName: String? = nil,
         port: Int,
         target: String = "Google Gemini AI",
         tcpPingMs: Int? = nil,
@@ -194,6 +197,7 @@ final class SpeedTestAuditLogger: ObservableObject {
             category: .probeTest,
             target: target,
             port: port,
+            activeNode: nodeName,
             latencyMs: ttfbMs ?? tlsHandshakeMs ?? tcpPingMs,
             tcpPingMs: tcpPingMs,
             tlsHandshakeMs: tlsHandshakeMs,
@@ -206,6 +210,7 @@ final class SpeedTestAuditLogger: ObservableObject {
     }
 
     func recordActualConnection(
+        nodeName: String? = nil,
         port: Int,
         endpoint: String,
         latencyMs: Int?,
@@ -217,6 +222,7 @@ final class SpeedTestAuditLogger: ObservableObject {
             category: .actualConnection,
             target: endpoint,
             port: port,
+            activeNode: nodeName,
             latencyMs: latencyMs,
             isSuccess: isSuccess,
             httpStatus: httpStatus,
@@ -309,12 +315,12 @@ final class SpeedTestAuditLogger: ObservableObject {
         var falsePositiveCount = 0
         var totalCompared = 0
 
-        // 以滑动时间窗口（5分钟内）将每次探活与实际 IDE 连接进行交叉关联对齐
+        // 以滑动时间窗口（60秒内）将每次探活与实际 IDE 连接进行交叉关联对齐
         for probe in probes {
             let probeTime = probe.timestamp.timeIntervalSince1970
-            // 查找与该测速时间相邻（±300秒内）的实际通信事件
+            // 查找与该测速时间相邻（±60秒内）的实际通信事件
             let matchedActuals = actuals.filter {
-                abs($0.timestamp.timeIntervalSince1970 - probeTime) <= 300.0
+                abs($0.timestamp.timeIntervalSince1970 - probeTime) <= 60.0
             }
 
             guard let closest = matchedActuals.min(by: {
@@ -345,8 +351,10 @@ final class SpeedTestAuditLogger: ObservableObject {
                 consistentCount += 1
             }
 
+            let effectiveNodeName = closest.activeNode ?? probe.activeNode
             comparisons.append(AuditComparisonItem(
                 timestamp: probe.timestamp,
+                nodeName: effectiveNodeName,
                 probeEstimatedLatency: probe.latencyMs,
                 probeStatus: probe.isSuccess ? "全通 (\(probe.latencyMs ?? 0)ms)" : "失败",
                 actualLatency: closest.latencyMs,

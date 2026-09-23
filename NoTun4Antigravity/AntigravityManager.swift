@@ -280,9 +280,10 @@ trip.com
         nodeHealth.isChecking = true
         self.activeNodeName = Self.resolveFlClashActiveNode()
         let port = self.activePort
+        let nodeName = self.activeNodeName
 
         Task.detached(priority: .userInitiated) {
-            let result = await Self.performDualProbe(port: port)
+            let result = await Self.performDualProbe(port: port, nodeName: nodeName)
             await MainActor.run {
                 self.nodeHealth = result
                 if let name = self.activeNodeName {
@@ -298,7 +299,7 @@ trip.com
         }
     }
 
-    nonisolated static func performDualProbe(port: Int) async -> NodeHealthStatus {
+    nonisolated static func performDualProbe(port: Int, nodeName: String? = nil) async -> NodeHealthStatus {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 7.0
         config.timeoutIntervalForResource = 8.0
@@ -393,26 +394,31 @@ trip.com
         }
 
         var errMsg: String? = nil
-        if googleSpeed == nil && !antigravityReady {
+        if !antigravityReady {
             if let err = lastCapturedError {
                 errMsg = "无法连接 Google 与 AI (\(diagnoseNetworkError(err)))"
             } else {
                 errMsg = "无法连接 Google 与 AI 节点"
             }
-        } else if !oauthReady && antigravityReady {
+        } else if !oauthReady {
             errMsg = "OAuth2 握手异常或被拦截 (Agent 任务易中断)"
-        } else if !cloudCodeReady && antigravityReady {
+        } else if !cloudCodeReady {
             errMsg = "CloudCode 调度流受限"
         }
 
+        // 核心修正：NoTun4Antigravity 探活成功的绝对标准必须是 Antigravity AI 通道通畅且未被 OAuth 阻断！
+        // 坚决杜绝因普通 Google 网页连通而掩盖 AI 核心断连的虚高误判
+        let isOverallAIOk = antigravityReady && oauthReady
+
         // 记录探活测速日志用于交叉质检与对齐
         SpeedTestAuditLogger.shared.recordProbe(
+            nodeName: nodeName,
             port: port,
             target: "Google Gemini AI & CloudCode",
             tcpPingMs: nil,
             tlsHandshakeMs: nil,
-            ttfbMs: antigravitySpeed ?? googleSpeed,
-            isSuccess: antigravityReady || (googleSpeed != nil),
+            ttfbMs: isOverallAIOk ? antigravitySpeed : nil,
+            isSuccess: isOverallAIOk,
             errorDetail: errMsg
         )
 
@@ -490,7 +496,10 @@ trip.com
     func sampleActualAntigravityConnection() {
         guard isProxyPortReady else { return }
         let port = self.activePort
-        let activeName = self.activeNodeName
+        let activeName = self.activeNodeName ?? Self.resolveFlClashActiveNode()
+        if self.activeNodeName != activeName {
+            self.activeNodeName = activeName
+        }
 
         Task.detached(priority: .utility) {
             let config = URLSessionConfiguration.ephemeral
@@ -516,6 +525,7 @@ trip.com
                     let isOk = (http.statusCode >= 200 && http.statusCode < 500)
                     let err = isOk ? nil : "HTTP \(http.statusCode) 网关阻断"
                     SpeedTestAuditLogger.shared.recordActualConnection(
+                        nodeName: activeName,
                         port: port,
                         endpoint: "generativelanguage.googleapis.com",
                         latencyMs: elapsed,
@@ -527,6 +537,7 @@ trip.com
             } catch {
                 let elapsed = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
                 SpeedTestAuditLogger.shared.recordActualConnection(
+                    nodeName: activeName,
                     port: port,
                     endpoint: "generativelanguage.googleapis.com",
                     latencyMs: elapsed > 7000 ? nil : elapsed,
@@ -544,6 +555,12 @@ trip.com
                         realAILatencyMs: nil,
                         failureReason: reason
                     )
+                    await MainActor.run {
+                        if self.activeNodeName == name {
+                            self.nodeHealth.isAntigravityReady = false
+                            self.nodeHealth.errorMessage = reason
+                        }
+                    }
                 }
             }
         }

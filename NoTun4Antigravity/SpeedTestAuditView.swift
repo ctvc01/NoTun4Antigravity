@@ -237,7 +237,16 @@ struct SpeedTestAuditView: View {
                 .frame(width: 44, alignment: .leading)
 
             // 比对数据横向铺开（呼吸感）
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                if let node = item.nodeName {
+                    Text(node)
+                        .font(.system(size: 8, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 90, alignment: .leading)
+                        .foregroundColor(.secondary)
+                }
+
                 HStack(spacing: 3) {
                     Text("预估:")
                         .font(.system(size: 9))

@@ -311,7 +311,9 @@ struct NodeSpeedTestView: View {
                             .background(Capsule().fill(Color.orange.opacity(0.18)))
                             .foregroundColor(.orange)
                     } else if !manager.nodeHealth.isAntigravityReady {
-                        Text("受限")
+                        let err = manager.nodeHealth.errorMessage ?? ""
+                        let tagText = err.contains("310") ? "310熔断" : (err.contains("TLS") ? "TLS阻断" : "受限")
+                        Text(tagText)
                             .font(.system(size: 8, weight: .bold))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -591,95 +593,7 @@ struct NodeSpeedTestView: View {
                                         .foregroundColor(.purple)
                                 }
 
-                                if isActiveNode {
-                                    // 当前活动节点的延迟直接展示真实端到端体检耗时！
-                                    if manager.nodeHealth.isChecking {
-                                        ProgressView().controlSize(.mini)
-                                    } else if !manager.nodeHealth.isAntigravityReady {
-                                        // 核心安全防线：若 AI 服务受限，即便 Google 网页通畅也坚决标红警示，严禁虚报正常
-                                        let tag = manager.nodeHealth.errorMessage?.contains("TLS") == true ? "TLS阻断" : "AI受限"
-                                        Text(tag)
-                                            .font(.system(size: 8, weight: .bold))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1.5)
-                                            .background(Capsule().fill(Color.red.opacity(0.2)))
-                                            .foregroundColor(.red)
-                                            .help(manager.nodeHealth.errorMessage ?? "当前节点无法正常连接 Google Gemini / Antigravity 服务")
-                                    } else if let realMs = manager.nodeHealth.antigravityLatencyMs {
-                                        let isFast = realMs < 400
-                                        let isMed = realMs < 800
-                                        HStack(spacing: 2) {
-                                            Text("AI")
-                                                .font(.system(size: 7, weight: .bold))
-                                            Text("\(realMs)ms")
-                                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                        }
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1.5)
-                                        .background(
-                                            Capsule().fill(
-                                                isFast ? Color.green.opacity(0.2) :
-                                                (isMed ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
-                                            )
-                                        )
-                                        .foregroundColor(isFast ? .green : (isMed ? .blue : .orange))
-                                        .help("当前活动节点访问 Google Gemini API 端到端真实响应速度")
-                                    } else if let err = manager.nodeHealth.errorMessage {
-                                        let tag = err.contains("TLS") ? "TLS阻断" : (err.contains("超时") ? "超时" : "断连")
-                                        Text(tag)
-                                            .font(.system(size: 8, weight: .bold))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1.5)
-                                            .background(Capsule().fill(Color.red.opacity(0.2)))
-                                            .foregroundColor(.red)
-                                    } else if let ms = node.latencyMs, ms <= 2000 {
-                                        Text("接入 \(ms)ms")
-                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1.5)
-                                            .background(Capsule().fill(Color.blue.opacity(0.18)))
-                                            .foregroundColor(.blue)
-                                    } else {
-                                        Text("不可用")
-                                            .font(.system(size: 8, weight: .medium))
-                                            .foregroundColor(.red)
-                                    }
-                                } else if node.isTesting {
-                                    ProgressView().controlSize(.mini)
-                                } else if let rec = auditLogger.nodeHealthRecords[node.name], rec.isAntigravityReady, let aiMs = rec.realAILatencyMs {
-                                    // 曾经进行过真实端到端体检且验证成功的节点：突出展示实测 AI 真实延迟！
-                                    HStack(spacing: 2) {
-                                        Text("实测AI")
-                                            .font(.system(size: 7, weight: .bold))
-                                        Text("\(aiMs)ms")
-                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    }
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1.5)
-                                    .background(Capsule().fill(Color.green.opacity(0.18)))
-                                    .foregroundColor(.green)
-                                    .help("该节点经端到端真机实测，可正常连接 Google Gemini API")
-                                } else if let ms = node.latencyMs {
-                                    // 尚未进行端到端体检的普通节点：明确标明这是到入口的接入握手延迟，不作虚高误导！
-                                    let isFast = ms < 180
-                                    let isMedium = ms < 350
-                                    Text("接入 \(ms)ms")
-                                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1.5)
-                                        .background(
-                                            Capsule().fill(
-                                                isFast ? Color.blue.opacity(0.15) :
-                                                (isMedium ? Color(NSColor.controlColor).opacity(0.2) : Color.orange.opacity(0.15))
-                                            )
-                                        )
-                                        .foregroundColor(isFast ? .primary : (isMedium ? .secondary : .orange))
-                                        .help("到节点入口服务器的 TCP 握手延迟 (非 Google 端到端)")
-                                } else if node.hasTested {
-                                    Text("断连")
-                                        .font(.system(size: 8, weight: .medium))
-                                        .foregroundColor(.red)
-                                }
+                                nodeLatencyBadge(node, isActive: isActiveNode)
 
                                 Button {
                                     NSPasteboard.general.clearContents()
@@ -1034,5 +948,84 @@ struct NodeSpeedTestView: View {
             isAIPrime: meta.isAIPrime,
             isUnsupportedType: false
         )
+    }
+
+    @ViewBuilder
+    private func nodeLatencyBadge(_ node: TestedNodeItem, isActive: Bool) -> some View {
+        if isActive {
+            activeNodeLatencyBadge()
+        } else if node.isTesting {
+            ProgressView().controlSize(.mini)
+        } else if let rec = auditLogger.nodeHealthRecords[node.name], rec.isAntigravityReady, let aiMs = rec.realAILatencyMs {
+            HStack(spacing: 2) {
+                Text("实测AI")
+                    .font(.system(size: 7, weight: .bold))
+                Text("\(aiMs)ms")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Color.green.opacity(0.18)))
+            .foregroundColor(.green)
+            .help("该节点经端到端真机实测，可正常连接 Google Gemini API")
+        } else if let ms = node.latencyMs {
+            let isFast = ms < 180
+            Text("接入 \(ms)ms")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1.5)
+                .background(Capsule().fill(isFast ? Color.blue.opacity(0.15) : Color.orange.opacity(0.15)))
+                .foregroundColor(isFast ? .primary : .orange)
+                .help("到节点入口服务器的 TCP 握手延迟 (非 Google 端到端)")
+        } else if node.hasTested {
+            Text("断连")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.red)
+        }
+    }
+
+    private var activeNodeFailureTag: String {
+        let err = manager.nodeHealth.errorMessage ?? ""
+        if err.contains("310") || err.contains("隧道超时") {
+            return "310熔断"
+        } else if err.contains("TLS") {
+            return "TLS阻断"
+        } else if err.contains("区域受限") {
+            return "AI受限"
+        } else {
+            return "AI不可用"
+        }
+    }
+
+    @ViewBuilder
+    private func activeNodeLatencyBadge() -> some View {
+        if manager.nodeHealth.isChecking {
+            ProgressView().controlSize(.mini)
+        } else if !manager.nodeHealth.isAntigravityReady {
+            Text(activeNodeFailureTag)
+                .font(.system(size: 8, weight: .bold))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1.5)
+                .background(Capsule().fill(Color.red.opacity(0.2)))
+                .foregroundColor(.red)
+                .help(manager.nodeHealth.errorMessage ?? "当前节点无法正常连接 Google Gemini / Antigravity 服务")
+        } else if let realMs = manager.nodeHealth.antigravityLatencyMs {
+            let isFast = realMs < 500
+            HStack(spacing: 2) {
+                Text("AI")
+                    .font(.system(size: 7, weight: .bold))
+                Text("\(realMs)ms")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(isFast ? Color.green.opacity(0.2) : Color.orange.opacity(0.2)))
+            .foregroundColor(isFast ? .green : .orange)
+            .help("当前活动节点访问 Google Gemini API 端到端真实响应速度")
+        } else {
+            Text("不可用")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.red)
+        }
     }
 }
