@@ -751,7 +751,15 @@ struct NodeSpeedTestView: View {
         }
     }
 
-    nonisolated static func measureSocketLatency(host: String, port: Int, timeoutMs: Int32 = 1500) async -> Int? {
+    nonisolated static func measureSocketLatency(host: String, port: Int, timeoutMs: Int32 = 2500) async -> Int? {
+        if let result = await rawMeasureSocketLatency(host: host, port: port, timeoutMs: timeoutMs) {
+            return result
+        }
+        // 轻量单次重试：针对海外直连节点，防止 DNS 解析排队抖动导致误判断连
+        return await rawMeasureSocketLatency(host: host, port: port, timeoutMs: timeoutMs)
+    }
+
+    private nonisolated static func rawMeasureSocketLatency(host: String, port: Int, timeoutMs: Int32) async -> Int? {
         guard !host.isEmpty, port > 0, port <= 65535 else { return nil }
 
         return await withCheckedContinuation { continuation in

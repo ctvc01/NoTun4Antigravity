@@ -134,10 +134,28 @@ trip.com
             }
         }
 
-        self.activeNodeName = Self.resolveFlClashActiveNode()
+        let oldNode = self.activeNodeName
+        let newNode = Self.resolveFlClashActiveNode()
+        self.activeNodeName = newNode
+        if let old = oldNode, let current = newNode, old != current {
+            // 用户在外部代理客户端（如 FlClash）中切换了节点！
+            // 1. 毫秒级重置 Antigravity 底层 NetworkService 连接池，清除旧节点的僵死 Socket
+            Self.flushAntigravityNetworkService()
+            // 2. 立即对新节点进行真实端到端体检
+            probeCurrentNodeHealth()
+        }
+
         checkProcessStatus()
         checkProxyPort(port: self.activePort)
         Self.checkAndSelfHealSystemProxyBypass()
+    }
+
+    nonisolated static func flushAntigravityNetworkService() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "Antigravity Helper.*network.mojom.NetworkService"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     // MARK: - Process Inspection
