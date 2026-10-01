@@ -86,6 +86,10 @@ struct TestedNodeItem: Identifiable, Equatable, Codable {
 
         return (isGemini, isHome, isNat, isAIPrime)
     }
+
+    var isReality: Bool {
+        name.localizedCaseInsensitiveContains("Reality")
+    }
 }
 
 struct NodeSpeedTestView: View {
@@ -107,6 +111,9 @@ struct NodeSpeedTestView: View {
     @State private var parsedNodes: [TestedNodeItem] = []
     @State private var copiedNodeName: String? = nil
     @State private var fetchErrorMessage: String? = nil
+    @State private var selectedRegion: String = "全部"
+
+    private let regions: [String] = ["全部", "🇯🇵 日本", "🇺🇸 美国", "🇭🇰 香港", "🇼🇸 台湾", "🇸🇬 新加坡", "⚡️ 专线"]
 
     private static let cacheKey = "cachedSubscriptionNodes"
 
@@ -145,6 +152,28 @@ struct NodeSpeedTestView: View {
                 return true
             }
 
+            // 地区快捷筛选
+            if selectedRegion != "全部" {
+                let name = node.name
+                let lower = name.lowercased()
+                switch selectedRegion {
+                case "🇯🇵 日本":
+                    guard name.contains("日本") || lower.contains("japan") || lower.contains("jp") else { return false }
+                case "🇺🇸 美国":
+                    guard name.contains("美國") || name.contains("美国") || lower.contains("usa") || lower.contains("us") else { return false }
+                case "🇭🇰 香港":
+                    guard name.contains("香港") || lower.contains("hongkong") || lower.contains("hk") else { return false }
+                case "🇼🇸 台湾":
+                    guard name.contains("台灣") || name.contains("台湾") || lower.contains("taiwan") || lower.contains("tw") else { return false }
+                case "🇸🇬 新加坡":
+                    guard name.contains("新加坡") || lower.contains("singapore") || lower.contains("sg") else { return false }
+                case "⚡️ 专线":
+                    guard node.isGeminiDedicated || node.isAIPrime else { return false }
+                default:
+                    break
+                }
+            }
+
             // 2. 核心端到端防护：凡是在历史或最新实测中被证实无法连接 Antigravity（如 TLS 阻断、AI 区域受限、OAuth 拦截）的节点，坚决过滤排除！
             if let record = auditLogger.nodeHealthRecords[node.name], !record.isAntigravityReady {
                 return false
@@ -180,6 +209,23 @@ struct NodeSpeedTestView: View {
                     if a.name == active { return true }
                     if b.name == active { return false }
                 }
+
+                let aiMsA = auditLogger.nodeHealthRecords[a.name]?.realAILatencyMs
+                let aiMsB = auditLogger.nodeHealthRecords[b.name]?.realAILatencyMs
+
+                // 1. 优先以端到端实测 AI 延迟排序（日本-04、日本-02等高可用低延迟节点稳居前列）
+                switch (aiMsA, aiMsB) {
+                case let (ms1?, ms2?):
+                    return ms1 < ms2
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+
+                // 2. 其次以接入 TCP 握手延迟次级排序
                 switch (a.latencyMs, b.latencyMs) {
                 case let (ms1?, ms2?):
                     return ms1 < ms2
@@ -362,6 +408,28 @@ struct NodeSpeedTestView: View {
                         }
                     }
                     .padding(.top, 2)
+                }
+
+                // 当前活动节点近3天真实通信质量看板
+                if let active = manager.activeNodeName, let stats = auditLogger.getRecentStats(for: active), stats.totalCount >= 5 {
+                    HStack(spacing: 5) {
+                        Text("近期质量:")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        Text("\(String(format: "%.0f", stats.successRatePercent))% 连通率")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(stats.successRatePercent >= 85 ? .green : (stats.successRatePercent >= 70 ? .orange : .red))
+                        if let med = stats.medianLatencyMs {
+                            Text("• 中位 \(med)ms")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.primary)
+                        }
+                        Text("(\(stats.totalCount)次通信)")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary.opacity(0.8))
+                        Spacer()
+                    }
+                    .padding(.top, 1)
                 }
             }
             .padding(8)
@@ -549,6 +617,32 @@ struct NodeSpeedTestView: View {
                 }
             }
 
+            // MARK: - 2.5 地区快捷筛选栏 (支持全部/日本/美国/香港/台湾/新加坡/专线)
+            if !parsedNodes.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(regions, id: \.self) { region in
+                            let isSelected = (selectedRegion == region)
+                            Button {
+                                selectedRegion = region
+                            } label: {
+                                Text(region)
+                                    .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        Capsule()
+                                            .fill(isSelected ? Color.blue : Color(NSColor.controlBackgroundColor).opacity(0.6))
+                                    )
+                                    .foregroundColor(isSelected ? .white : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
             // MARK: - 3. 节点垂直列表 (类似 macOS Wi-Fi 列表)
             ScrollView {
                 VStack(spacing: 4) {
@@ -591,6 +685,15 @@ struct NodeSpeedTestView: View {
                                         .padding(.vertical, 1)
                                         .background(Capsule().fill(Color.purple.opacity(0.18)))
                                         .foregroundColor(.purple)
+                                }
+
+                                if node.isReality {
+                                    Text("Reality")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.teal.opacity(0.18)))
+                                        .foregroundColor(.teal)
                                 }
 
                                 nodeLatencyBadge(node, isActive: isActiveNode)

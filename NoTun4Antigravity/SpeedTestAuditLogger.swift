@@ -62,6 +62,13 @@ struct AuditCorrelationReport: Equatable {
     var recentComparisons: [AuditComparisonItem] = []
 }
 
+struct NodeRecentStats: Equatable {
+    var totalCount: Int
+    var successCount: Int
+    var successRatePercent: Double
+    var medianLatencyMs: Int?
+}
+
 // MARK: - Node Real Health Records (端到端真实健康记忆)
 
 struct NodeRealHealthRecord: Codable, Equatable {
@@ -179,6 +186,50 @@ final class SpeedTestAuditLogger: ObservableObject {
                 failureReason: "AI 区域受限"
             )
         }
+
+        // 自动自愈：超过 12 小时的瞬态故障记录自动解封，避免优质节点因单次网络抖动被永久雪藏
+        autoHealHealthRecords()
+    }
+
+    func autoHealHealthRecords() {
+        let now = Date()
+        var changed = false
+        for (name, record) in nodeHealthRecords {
+            // 硬性拦截名单（如特殊 gRPC 系列）保持长期黑名单，普通节点（如 Reality/普通直连）超时自愈
+            let isHardblocked = name.contains("特殊｜") || name.contains("特殊|")
+            if !record.isAntigravityReady && !isHardblocked {
+                if now.timeIntervalSince(record.lastChecked) > 43200 { // 12 小时 TTL
+                    nodeHealthRecords.removeValue(forKey: name)
+                    changed = true
+                }
+            }
+        }
+        if changed {
+            saveHealthRecordsToDisk()
+        }
+    }
+
+    func getRecentStats(for nodeName: String, withinHours: Double = 72.0) -> NodeRecentStats? {
+        let cutoff = Date().addingTimeInterval(-withinHours * 3600)
+        let relevant = entries.filter { entry in
+            guard entry.timestamp >= cutoff else { return false }
+            return entry.activeNode == nodeName
+        }
+        guard !relevant.isEmpty else { return nil }
+
+        let total = relevant.count
+        let success = relevant.filter { $0.isSuccess }.count
+        let rate = (Double(success) / Double(total)) * 100.0
+
+        let validLats = relevant.compactMap { $0.latencyMs }.sorted()
+        let medianLat = validLats.isEmpty ? nil : validLats[validLats.count / 2]
+
+        return NodeRecentStats(
+            totalCount: total,
+            successCount: success,
+            successRatePercent: rate,
+            medianLatencyMs: medianLat
+        )
     }
 
     // MARK: - Logging APIs
