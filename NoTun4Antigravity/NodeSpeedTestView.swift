@@ -179,9 +179,25 @@ struct NodeSpeedTestView: View {
                 return false
             }
 
-            // 3. 架构特征过滤：排除「特殊｜」系列实验节点（加拿大A、德国A、美国A等在日志中已证实 100% 存在 gRPC/TLS/310 隧道不兼容）
+            // 3. 架构特征与高风险节点深度过滤：
+            // 3.1 排除「特殊｜」系列实验节点（加拿大A、德国A、美国A等在日志中已证实 100% 存在 gRPC/TLS/310 隧道不兼容）
             let isSpecialFamily = node.name.contains("特殊｜") || node.name.contains("特殊|") || (node.name.contains("特殊") && !node.isGeminiDedicated && !node.isAIPrime)
             if isSpecialFamily {
+                return false
+            }
+
+            // 3.2 排除临时「[試用]」/「[试用]」测试节点（无 SLA 保障，在 Agent 高频工具调用时极易断流）
+            if node.name.contains("試用") || node.name.contains("试用") {
+                return false
+            }
+
+            // 3.3 排除超高倍率且限速节点（如 [10.0][家寬][限速]，传输代码/大模型上下文极易触发硬超时）
+            if (node.name.contains("10.0") || node.name.contains("5.0")) && (node.name.contains("限速") || node.name.contains("限速]")) {
+                return false
+            }
+
+            // 3.4 排除在日志中已证实结构性失效的节点（日本-02 TLS 证书阻断、台湾-07 落地机 AI 区域封控）
+            if node.name.contains("日本-02") || node.name.contains("台灣-07") || node.name.contains("台湾-07") {
                 return false
             }
 
@@ -502,9 +518,15 @@ struct NodeSpeedTestView: View {
                                 .foregroundColor(.blue)
 
                             if savedSubscriptionUrl.isEmpty {
-                                Text("未配置订阅")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
+                                if hasLocalFlClashProfiles {
+                                    Text("FlClash 本地配置 (\(parsedNodes.count)节点)")
+                                        .font(.system(size: 9.5, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("未配置订阅")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
                             } else {
                                 Text(lastUpdateText)
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -552,7 +574,7 @@ struct NodeSpeedTestView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(isLoadingSubscription || savedSubscriptionUrl.isEmpty)
+                        .disabled(isLoadingSubscription || (savedSubscriptionUrl.isEmpty && !hasLocalFlClashProfiles))
 
                         // 测速按钮
                         if !parsedNodes.isEmpty {
@@ -696,6 +718,15 @@ struct NodeSpeedTestView: View {
                                         .foregroundColor(.teal)
                                 }
 
+                                if isTopPerformer(node) {
+                                    Text("推荐")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.orange.opacity(0.2)))
+                                        .foregroundColor(.orange)
+                                }
+
                                 nodeLatencyBadge(node, isActive: isActiveNode)
 
                                 Button {
@@ -739,14 +770,67 @@ struct NodeSpeedTestView: View {
             } else if !savedSubscriptionUrl.isEmpty {
                 // 仅在首次本地无缓存且配置了订阅链接时自动拉取
                 loadSubscription()
+            } else if let localNodes = loadLocalFlClashNodes() {
+                // 若用户未配置订阅链接且无缓存，自动发现并读取本地 FlClash 活跃配置
+                self.parsedNodes = localNodes
+                self.lastSubscriptionUpdateTime = Date().timeIntervalSince1970
+                self.saveCachedNodes(localNodes)
             }
         }
+    }
+
+    // MARK: - FlClash Local Profiles Auto-Discovery
+
+    private func isTopPerformer(_ node: TestedNodeItem) -> Bool {
+        guard let stats = auditLogger.getRecentStats(for: node.name) else { return false }
+        return stats.totalCount >= 5 && stats.successRatePercent >= 90.0 && (stats.medianLatencyMs ?? 9999) <= 700
+    }
+
+    private var hasLocalFlClashProfiles: Bool {
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.follow.clash/profiles")
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: appSupport.path) else { return false }
+        return files.contains { $0.hasSuffix(".yaml") || $0.hasSuffix(".yml") }
+    }
+
+    private func loadLocalFlClashNodes() -> [TestedNodeItem]? {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.follow.clash/profiles")
+        guard let files = try? fileManager.contentsOfDirectory(at: appSupport, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            return nil
+        }
+        let yamlFiles = files
+            .filter { $0.pathExtension.lowercased() == "yaml" || $0.pathExtension.lowercased() == "yml" }
+            .sorted { file1, file2 in
+                let date1 = (try? file1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                let date2 = (try? file2.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                return date1 > date2
+            }
+        guard let latest = yamlFiles.first, let data = try? Data(contentsOf: latest) else {
+            return nil
+        }
+        let nodes = parseNodesFromRawData(data)
+        return nodes.isEmpty ? nil : nodes
     }
 
     // MARK: - Direct Fetch & Robust Parsing
 
     private func loadSubscription() {
         let trimmed = subscriptionUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if let localNodes = loadLocalFlClashNodes() {
+                self.parsedNodes = localNodes
+                self.lastSubscriptionUpdateTime = Date().timeIntervalSince1970
+                self.saveCachedNodes(localNodes)
+                self.fetchErrorMessage = nil
+                self.testAllNodesSpeed()
+                return
+            } else {
+                fetchErrorMessage = "请输入有效的订阅 URL 或启动 FlClash"
+                return
+            }
+        }
         guard let url = URL(string: trimmed) else {
             fetchErrorMessage = "请输入有效的订阅 URL"
             return
@@ -1068,6 +1152,7 @@ struct NodeSpeedTestView: View {
         } else if node.isTesting {
             ProgressView().controlSize(.mini)
         } else if let rec = auditLogger.nodeHealthRecords[node.name], rec.isAntigravityReady, let aiMs = rec.realAILatencyMs {
+            let isSlow = aiMs > 3000
             HStack(spacing: 2) {
                 Text("实测AI")
                     .font(.system(size: 7, weight: .bold))
@@ -1076,9 +1161,9 @@ struct NodeSpeedTestView: View {
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(Color.green.opacity(0.18)))
-            .foregroundColor(.green)
-            .help("该节点经端到端真机实测，可正常连接 Google Gemini API")
+            .background(Capsule().fill(isSlow ? Color.orange.opacity(0.2) : Color.green.opacity(0.18)))
+            .foregroundColor(isSlow ? .orange : .green)
+            .help(isSlow ? "该节点实测 AI 延迟偏高 (>3000ms)，可能影响流式交互响应" : "该节点经端到端真机实测，可正常连接 Google Gemini API")
         } else if let ms = node.latencyMs {
             let isFast = ms < 180
             Text("接入 \(ms)ms")

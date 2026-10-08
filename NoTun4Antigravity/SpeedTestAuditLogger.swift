@@ -175,8 +175,8 @@ final class SpeedTestAuditLogger: ObservableObject {
                 failureReason: "TLS 握手校验失败"
             )
         }
-        // 4. 台湾07节点：普通网页通但落地机被 Google Gemini 严格封控（返回受限）
-        if nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] == nil {
+        // 4. 台湾07节点：普通网页通但落地机被 Google Gemini 严格封控（返回受限/延迟超5.6s）
+        if nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] == nil || (nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"]?.realAILatencyMs ?? 0) > 3500 {
             nodeHealthRecords["🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]"] = NodeRealHealthRecord(
                 nodeName: "🇼🇸 直連｜台灣-07 [1.0][家寬][gRPC]",
                 isAntigravityReady: false,
@@ -184,6 +184,17 @@ final class SpeedTestAuditLogger: ObservableObject {
                 realAILatencyMs: nil,
                 lastChecked: Date(),
                 failureReason: "AI 区域受限"
+            )
+        }
+        // 5. 日本02节点：自10月2日起证书与Reality目标失效，连续爆发 TLS 握手阻断
+        if nodeHealthRecords["🇯🇵 直連｜日本-02 [1.0][Reality]"] == nil || !(nodeHealthRecords["🇯🇵 直連｜日本-02 [1.0][Reality]"]?.isAntigravityReady ?? true) {
+            nodeHealthRecords["🇯🇵 直連｜日本-02 [1.0][Reality]"] = NodeRealHealthRecord(
+                nodeName: "🇯🇵 直連｜日本-02 [1.0][Reality]",
+                isAntigravityReady: false,
+                isOAuthReady: false,
+                realAILatencyMs: nil,
+                lastChecked: Date(),
+                failureReason: "TLS 握手阻断"
             )
         }
 
@@ -195,10 +206,18 @@ final class SpeedTestAuditLogger: ObservableObject {
         let now = Date()
         var changed = false
         for (name, record) in nodeHealthRecords {
-            // 硬性拦截名单（如特殊 gRPC 系列）保持长期黑名单，普通节点（如 Reality/普通直连）超时自愈
-            let isHardblocked = name.contains("特殊｜") || name.contains("特殊|")
-            if !record.isAntigravityReady && !isHardblocked {
-                if now.timeIntervalSince(record.lastChecked) > 43200 { // 12 小时 TTL
+            // 结构性硬拦截名单（特殊系列、证书阻断、AI受限、已知黑名单）：禁止 12h 自动解封
+            let reason = record.failureReason ?? ""
+            let isStructuralBlock = reason.contains("TLS 握手阻断") ||
+                                    reason.contains("AI 区域受限") ||
+                                    name.contains("特殊｜") ||
+                                    name.contains("特殊|") ||
+                                    name.contains("日本-02") ||
+                                    name.contains("台灣-07") ||
+                                    name.contains("台湾-07")
+
+            if !record.isAntigravityReady && !isStructuralBlock {
+                if now.timeIntervalSince(record.lastChecked) > 43200 { // 12 小时 TTL 仅适用于临时网络超时抖动
                     nodeHealthRecords.removeValue(forKey: name)
                     changed = true
                 }
